@@ -36,6 +36,8 @@ export interface AttendanceRecord {
   date?: string;
   time_in?: string;
   time_out?: string;
+  break_start?: string;       // new
+  break_end?: string;         // new
   break_duration?: number;
   hours_worked?: number;
   status: string;

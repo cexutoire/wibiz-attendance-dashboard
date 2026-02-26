@@ -147,9 +147,20 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ─── Hours Progress Bar ──────────────────────────────────────────────────────
+// ─── Format helpers ──────────────────────────────────────────────────────────
 const TARGET_HOURS = 8;
 
+function fmtHours(h?: number): string {
+  if (!h || h <= 0) return "—";
+  const totalMins = Math.round(h * 60);
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hrs === 0) return `${mins}m`;
+  if (mins === 0) return `${hrs}h`;
+  return `${hrs}h ${mins}m`;
+}
+
+// ─── Hours Progress Bar ──────────────────────────────────────────────────────
 function HoursProgress({ hours, status }: { hours?: number; status: string }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.complete;
   const pct = Math.min(((hours ?? 0) / TARGET_HOURS) * 100, 100);
@@ -160,7 +171,7 @@ function HoursProgress({ hours, status }: { hours?: number; status: string }) {
           Progress
         </span>
         <span className="text-[10px] font-bold text-slate-500 tabular-nums">
-          {(hours ?? 0).toFixed(1)} / {TARGET_HOURS}h
+          {fmtHours(hours)} / {TARGET_HOURS}h
         </span>
       </div>
       <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -260,15 +271,19 @@ function App() {
 
   const downloadXLSX = () => {
     const wb = XLSX.utils.book_new();
+
+    // ── Attendance sheet ──
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([
         [
           "Member",
-          "In",
-          "Out",
-          "Break",
-          "Hours",
+          "Time In",
+          "Time Out",
+          "Break Start",
+          "Break End",
+          "Break Duration",
+          "Total Hours",
           "Status",
           "Late",
           "Undertime",
@@ -277,8 +292,10 @@ function App() {
           r.name,
           r.time_in || "-",
           r.time_out || "-",
-          r.break_duration ? `${r.break_duration.toFixed(1)}h` : "-",
-          r.hours_worked?.toFixed(2) || "0",
+          r.break_start || "-",
+          r.break_end || "-",
+          fmtHours(r.break_duration),
+          fmtHours(r.hours_worked),
           r.status.toUpperCase(),
           r.late ? "YES" : "No",
           r.undertime ? "YES" : "No",
@@ -286,6 +303,8 @@ function App() {
       ]),
       "Attendance",
     );
+
+    // ── Absent sheet ──
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([
@@ -298,6 +317,8 @@ function App() {
       ]),
       "Absent Today",
     );
+
+    // ── Task Report sheet ──
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([
@@ -311,6 +332,8 @@ function App() {
       ]),
       "Task Report",
     );
+
+    // ── Weekly Summary sheet ──
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([
@@ -333,6 +356,7 @@ function App() {
       ]),
       "Weekly Summary",
     );
+
     XLSX.writeFile(
       wb,
       `Attendance_Report_${currentDate.toISOString().split("T")[0]}.xlsx`,
@@ -344,7 +368,6 @@ function App() {
   const attendanceRate =
     totalStaff > 0 ? Math.round((presentCount / totalStaff) * 100) : 0;
 
-  // ── Management alert data ──
   const streakers = (attendanceCount?.absent ?? []).filter(
     (s) => (s.consecutive_absences ?? 0) >= 2,
   );
@@ -443,6 +466,7 @@ function App() {
               </p>
             </div>
           </div>
+
           <div className="hidden sm:flex flex-col items-center pointer-events-none select-none">
             <span className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-indigo-400" />
@@ -453,6 +477,7 @@ function App() {
               {liveTimeStr}
             </span>
           </div>
+
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={loadData}
@@ -578,7 +603,6 @@ function App() {
               </div>
               {!loading && attendanceCount && (
                 <div className="flex items-center gap-3">
-                  {/* Attendance rate bar */}
                   <div className="hidden sm:flex items-center gap-2">
                     <div className="text-right">
                       <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -651,6 +675,7 @@ function App() {
                   </ul>
                 )}
               </div>
+
               {/* Absent */}
               <div className="p-5">
                 <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
@@ -692,7 +717,6 @@ function App() {
                             </p>
                           )}
                         </div>
-                        {/* Consecutive absence streak badge */}
                         {(s.consecutive_absences ?? 0) >= 2 && (
                           <span className="text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full shrink-0">
                             {s.consecutive_absences}d streak
@@ -710,11 +734,9 @@ function App() {
         {/* ── Live Attendance ── */}
         <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-700">
-                Live Attendance
-              </h2>
-            </div>
+            <h2 className="text-sm font-bold text-slate-700">
+              Live Attendance
+            </h2>
             {!loading && (
               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 bg-emerald-50 ring-1 ring-emerald-100 px-2.5 py-1 rounded-full">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -723,7 +745,7 @@ function App() {
             )}
           </div>
 
-          {/* ── Search & Filter bar ── */}
+          {/* ── Search & Filter ── */}
           <div className="px-6 py-3 border-b border-slate-100 flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -836,7 +858,6 @@ function App() {
                             <p className="text-sm font-bold text-slate-800 truncate">
                               {r.name}
                             </p>
-                            {/* Late / Undertime badges */}
                             <div className="flex gap-1 mt-0.5 flex-wrap">
                               {r.late && (
                                 <span className="text-[10px] font-bold bg-amber-50 text-amber-600 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full">
@@ -872,25 +893,44 @@ function App() {
                             {r.time_out ?? "—"}
                           </p>
                         </div>
-                        <div className="bg-amber-50 rounded-xl px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-widest mb-0.5">
-                            Break
-                          </p>
-                          <p className="text-sm font-bold tabular-nums text-amber-600">
-                            {r.break_duration
-                              ? `${r.break_duration.toFixed(1)}h`
-                              : "—"}
-                          </p>
+
+                        {/* Break — full width with start/end times */}
+                        <div className="col-span-2 bg-amber-50 rounded-xl px-3 py-2.5">
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-widest">
+                              Break
+                            </p>
+                            <p className="text-sm font-bold tabular-nums text-amber-600">
+                              {fmtHours(r.break_duration)}
+                            </p>
+                          </div>
+                          {r.break_start || r.break_end ? (
+                            <div className="flex items-center gap-1.5 text-[10px] tabular-nums text-amber-500">
+                              <span className="font-semibold">
+                                {r.break_start ?? "—"}
+                              </span>
+                              <span className="text-amber-300">→</span>
+                              <span className="font-semibold">
+                                {r.break_end ?? "ongoing"}
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-amber-300">
+                              No break recorded
+                            </p>
+                          )}
                         </div>
-                        <div className="bg-indigo-50 rounded-xl px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest mb-0.5">
-                            Hours
-                          </p>
-                          <p className="text-sm font-bold tabular-nums text-indigo-600">
-                            {r.hours_worked
-                              ? `${r.hours_worked.toFixed(1)}h`
-                              : "—"}
-                          </p>
+
+                        {/* Total Hours — full width */}
+                        <div className="col-span-2 bg-indigo-50 rounded-xl px-3 py-2.5">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest">
+                              Total Hours
+                            </p>
+                            <p className="text-sm font-bold tabular-nums text-indigo-600">
+                              {fmtHours(r.hours_worked)}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
@@ -977,7 +1017,7 @@ function App() {
           </div>
         </div>
 
-        {/* ── Summaries card ── */}
+        {/* ── Summaries ── */}
         <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
@@ -1060,10 +1100,10 @@ function App() {
                           {w.days_worked}
                         </td>
                         <td className="py-3.5 px-4 tabular-nums font-bold text-indigo-600">
-                          {w.total_hours.toFixed(1)}h
+                          {fmtHours(w.total_hours)}
                         </td>
                         <td className="py-3.5 px-6 text-right tabular-nums text-slate-500">
-                          {w.avg_hours_per_day.toFixed(1)}h
+                          {fmtHours(w.avg_hours_per_day)}
                         </td>
                       </tr>
                     ))
@@ -1115,13 +1155,13 @@ function App() {
                           {m.days_worked}
                         </td>
                         <td className="py-3.5 px-4 tabular-nums font-bold text-indigo-600">
-                          {m.total_hours.toFixed(1)}h
+                          {fmtHours(m.total_hours)}
                         </td>
                         <td className="py-3.5 px-4 tabular-nums text-slate-500">
-                          {m.avg_hours_per_day.toFixed(1)}h
+                          {fmtHours(m.avg_hours_per_day)}
                         </td>
                         <td className="py-3.5 px-6 text-right tabular-nums text-amber-600 font-semibold">
-                          {m.total_break_hours.toFixed(1)}h
+                          {fmtHours(m.total_break_hours)}
                         </td>
                       </tr>
                     ))
@@ -1164,14 +1204,15 @@ function App() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex-1 overflow-auto p-6 space-y-6 bg-slate-50/50 scrollbar-thin">
+
+            <div className="flex-1 overflow-auto p-6 space-y-6 bg-slate-50/50">
               {/* Absent preview */}
               {(attendanceCount?.absent.length ?? 0) > 0 && (
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
                     Absent Staff Preview
                   </p>
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                     <table className="w-full text-xs text-left">
                       <thead className="bg-rose-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
                         <tr>
@@ -1205,20 +1246,22 @@ function App() {
                   </div>
                 </div>
               )}
+
               {/* Attendance preview */}
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
                   Attendance Preview
                 </p>
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                   <table className="w-full text-xs text-left">
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
                       <tr>
                         <th className="px-3 py-2.5">Name</th>
                         <th className="px-3 py-2.5">In</th>
                         <th className="px-3 py-2.5">Out</th>
-                        <th className="px-3 py-2.5">Break</th>
-                        <th className="px-3 py-2.5">Hours</th>
+                        <th className="px-3 py-2.5">Break Time</th>
+                        <th className="px-3 py-2.5">Break Dur.</th>
+                        <th className="px-3 py-2.5">Total Hours</th>
                         <th className="px-3 py-2.5">Flags</th>
                       </tr>
                     </thead>
@@ -1234,15 +1277,16 @@ function App() {
                           <td className="px-3 py-2.5 tabular-nums">
                             {r.time_out || "—"}
                           </td>
-                          <td className="px-3 py-2.5 tabular-nums">
-                            {r.break_duration
-                              ? `${r.break_duration.toFixed(1)}h`
+                          <td className="px-3 py-2.5 tabular-nums text-amber-600 whitespace-nowrap">
+                            {r.break_start || r.break_end
+                              ? `${r.break_start ?? "—"} → ${r.break_end ?? "ongoing"}`
                               : "—"}
                           </td>
-                          <td className="px-3 py-2.5 tabular-nums font-semibold">
-                            {r.hours_worked
-                              ? `${r.hours_worked.toFixed(1)}h`
-                              : "—"}
+                          <td className="px-3 py-2.5 tabular-nums text-amber-600 font-semibold">
+                            {fmtHours(r.break_duration)}
+                          </td>
+                          <td className="px-3 py-2.5 tabular-nums font-semibold text-indigo-600">
+                            {fmtHours(r.hours_worked)}
                           </td>
                           <td className="px-3 py-2.5">
                             <div className="flex gap-1">
@@ -1267,12 +1311,13 @@ function App() {
                   </table>
                 </div>
               </div>
-              {/* Task log preview */}
+
+              {/* Task Log preview */}
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
                   Task Log Preview
                 </p>
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-card">
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                   <table className="w-full text-xs text-left">
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
                       <tr>
@@ -1313,6 +1358,7 @@ function App() {
                 </div>
               </div>
             </div>
+
             <div className="p-5 border-t border-slate-100 bg-white rounded-b-2xl flex justify-end gap-3">
               <button
                 onClick={() => setShowPreview(false)}
@@ -1346,54 +1392,3 @@ function App() {
 }
 
 export default App;
-
-// ❌ DELETE everything below this line — it was accidentally left outside the App function
-// {/* ── Management Alert Banner ── */}
-// {!loading && hasAlerts && (
-//   (() => {
-//     const streakers = attendanceCount?.absent.filter(
-//       (s) => (s.consecutive_absences ?? 0) >= 2
-//     );
-//     const undertime = todayAttendance.filter(
-//       (r) => r.undertime && r.status === "complete"
-//     );
-//     const late = todayAttendance.filter((r) => r.late);
-//     if (!streakers.length && !undertime.length && !late.length) return null;
-//     return (
-//       <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex flex-wrap gap-4 items-start">
-//         <div className="flex items-center gap-2 shrink-0">
-//           <AlertCircle className="w-4 h-4 text-amber-500" />
-//           <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">
-//             Management Alerts
-//           </span>
-//         </div>
-//         <div className="flex flex-wrap gap-2">
-//           {streakers.map((s, i) => (
-//             <span
-//               key={i}
-//               className="text-[11px] font-semibold bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full"
-//             >
-//               {s.name} — {s.consecutive_absences}d absent streak
-//             </span>
-//           ))}
-//           {late.map((r, i) => (
-//             <span
-//               key={i}
-//               className="text-[11px] font-semibold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full"
-//             >
-//               {r.name} — Late today
-//             </span>
-//           ))}
-//           {undertime.map((r, i) => (
-//             <span
-//               key={i}
-//               className="text-[11px] font-semibold bg-orange-100 text-orange-700 px-2.5 py-1 rounded-full"
-//             >
-//               {r.name} — Undertime
-//             </span>
-//           ))}
-//         </div>
-//       </div>
-//     );
-//   })()
-// )}
