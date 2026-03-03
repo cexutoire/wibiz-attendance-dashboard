@@ -1,4 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Tooltip,
+  Legend,
+  Cell,
+} from "recharts";
 import {
   RefreshCw,
   ExternalLink,
@@ -16,6 +24,8 @@ import {
   Briefcase,
   Search,
   Filter,
+  Moon,
+  Sun,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -74,21 +84,6 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
 }
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
-function SkeletonRow() {
-  return (
-    <tr>
-      {[44, 28, 22, 18, 18, 14].map((w, i) => (
-        <td key={i} className="py-4 px-4">
-          <div
-            className="h-3 rounded animate-shimmer"
-            style={{ width: `${w}%`, minWidth: 32 }}
-          />
-        </td>
-      ))}
-    </tr>
-  );
-}
-
 function SkeletonTaskCard() {
   return (
     <div className="flex items-start gap-4 px-6 py-4">
@@ -100,6 +95,18 @@ function SkeletonTaskCard() {
     </div>
   );
 }
+
+// ─── Chart colors ───────────────────────────────────────────────────────────
+const CHART_COLORS = [
+  "#6366f1",
+  "#3b82f6",
+  "#10b981",
+  "#f59e0b",
+  "#ec4899",
+  "#8b5cf6",
+  "#14b8a6",
+  "#f97316",
+];
 
 // ─── Status config ───────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<
@@ -167,14 +174,14 @@ function HoursProgress({ hours, status }: { hours?: number; status: string }) {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
           Progress
         </span>
-        <span className="text-[10px] font-bold text-slate-500 tabular-nums">
+        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 tabular-nums">
           {fmtHours(hours)} / {TARGET_HOURS}h
         </span>
       </div>
-      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+      <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-700 ${cfg.progress}`}
           style={{ width: `${pct}%` }}
@@ -205,8 +212,40 @@ function App() {
   const [liveTime, setLiveTime] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
-    "all" | "clocked_in" | "on_break" | "complete"
+    "all" | "clocked_in" | "complete"
   >("all");
+  const [dark, setDark] = useState<boolean>(() => {
+    const stored = localStorage.getItem("theme");
+    if (stored === "dark") return true;
+    if (stored === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+
+  useEffect(() => {
+    if (dark) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+  }, [dark]);
+
+  const tooltipStyle = dark
+    ? {
+        borderRadius: 12,
+        border: "1px solid #334155",
+        fontSize: 12,
+        boxShadow: "0 4px 16px rgba(0,0,0,.4)",
+        backgroundColor: "#1e293b",
+        color: "#e2e8f0",
+      }
+    : {
+        borderRadius: 12,
+        border: "1px solid #e2e8f0",
+        fontSize: 12,
+        boxShadow: "0 4px 16px rgba(0,0,0,.08)",
+      };
 
   const loadData = async () => {
     try {
@@ -239,7 +278,7 @@ function App() {
 
   useEffect(() => {
     loadData();
-    const dataInterval = setInterval(loadData, 30000);
+    const dataInterval = setInterval(loadData, 300000); // refresh every 5 minutes
     const clockInterval = setInterval(() => setLiveTime(new Date()), 1000);
     return () => {
       clearInterval(dataInterval);
@@ -413,17 +452,17 @@ function App() {
       trend: "up",
       trendLabel: "Active",
     },
-    {
-      label: "On Break",
-      value: stats?.on_break ?? 0,
-      sub: "",
-      icon: <Coffee className="w-5 h-5" />,
-      color: "text-amber-600",
-      bg: "bg-amber-50",
-      ring: "ring-amber-100",
-      trend: "neutral",
-      trendLabel: "Resting",
-    },
+    // {
+    //   label: "On Break",
+    //   value: stats?.on_break ?? 0,
+    //   sub: "",
+    //   icon: <Coffee className="w-5 h-5" />,
+    //   color: "text-amber-600",
+    //   bg: "bg-amber-50",
+    //   ring: "ring-amber-100",
+    //   trend: "neutral",
+    //   trendLabel: "Resting",
+    // },
     {
       label: "Weekly Hours",
       value: `${stats?.week_hours ?? 0}h`,
@@ -449,40 +488,67 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans transition-colors duration-200">
       {/* ── Header ── */}
-      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+      <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-700/80 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-inner">
               <Briefcase className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-bold text-slate-800 leading-tight">
+              <h1 className="text-sm font-bold text-slate-800 dark:text-slate-100 leading-tight">
                 Digital Benefits
               </h1>
-              <p className="text-[10px] text-slate-400 font-medium tracking-wide">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium tracking-wide">
                 ATTENDANCE DASHBOARD
               </p>
             </div>
           </div>
 
           <div className="hidden sm:flex flex-col items-center pointer-events-none select-none">
-            <span className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-indigo-400" />
               {formattedDate}
             </span>
-            <span className="text-base font-bold tabular-nums text-slate-700 tracking-tight flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-base font-bold tabular-nums text-slate-700 dark:text-slate-200 tracking-tight flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
               {liveTimeStr}
             </span>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Theme toggle — always visible */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-700/60 rounded-lg p-0.5 gap-0.5">
+              <button
+                onClick={() => setDark(false)}
+                className={`flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-semibold transition-all ${
+                  !dark
+                    ? "bg-white dark:bg-slate-600 text-amber-500 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                }`}
+                aria-label="Light mode"
+              >
+                <Sun className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Light</span>
+              </button>
+              <button
+                onClick={() => setDark(true)}
+                className={`flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-semibold transition-all ${
+                  dark
+                    ? "bg-white dark:bg-slate-600 text-indigo-500 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                }`}
+                aria-label="Dark mode"
+              >
+                <Moon className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Dark</span>
+              </button>
+            </div>
             <button
               onClick={loadData}
               disabled={loading}
-              className="h-9 px-3 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="h-9 px-3 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2 disabled:opacity-50"
             >
               <RefreshCw
                 className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
@@ -506,10 +572,10 @@ function App() {
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-6 animate-fade-in">
         {/* ── Management Alert Banner ── */}
         {!loading && hasAlerts && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex flex-wrap gap-4 items-start">
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-2xl px-5 py-4 flex flex-wrap gap-4 items-start">
             <div className="flex items-center gap-2 shrink-0">
               <AlertCircle className="w-4 h-4 text-amber-500" />
-              <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
                 Management Alerts
               </span>
             </div>
@@ -543,11 +609,11 @@ function App() {
         )}
 
         {/* ── Stat Cards ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {statCards.map((card) => (
             <div
               key={card.label}
-              className="bg-white rounded-2xl border border-slate-200/60 p-5 shadow-card hover:shadow-card-hover hover:scale-[1.02] transition-all duration-200"
+              className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 p-5 shadow-card hover:shadow-card-hover hover:scale-[1.02] transition-all duration-200"
             >
               <div
                 className={`w-10 h-10 ${card.bg} ring-1 ${card.ring} rounded-xl flex items-center justify-center mb-3`}
@@ -559,11 +625,13 @@ function App() {
               >
                 {card.value}
               </p>
-              <p className="text-xs font-medium text-slate-400 mt-1">
+              <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-1">
                 {card.label}
               </p>
               {card.sub && (
-                <p className="text-[10px] text-slate-300 mt-0.5">{card.sub}</p>
+                <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">
+                  {card.sub}
+                </p>
               )}
               <div className="flex items-center gap-1 mt-2">
                 {card.trend === "up" ? (
@@ -591,13 +659,13 @@ function App() {
 
         {/* ── Attendance Count card ── */}
         {(attendanceCount || loading) && (
-          <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-bold text-slate-700">
+                <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                   Attendance Count
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                   {attendanceCount?.date ?? "Today"}
                 </p>
               </div>
@@ -618,7 +686,7 @@ function App() {
                         {attendanceRate}%
                       </p>
                     </div>
-                    <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="w-20 h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-700 ${
                           attendanceRate >= 80
@@ -638,7 +706,7 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+            <div className="grid grid-cols-1 sm:grid-cols-2 items-start divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-700/50">
               {/* Present */}
               <div className="p-5">
                 <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
@@ -656,23 +724,26 @@ function App() {
                     No staff present yet
                   </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                     {attendanceCount?.present.map((s, i) => (
-                      <li key={i} className="flex items-center gap-2.5">
+                      <div
+                        key={i}
+                        className="flex flex-col items-center gap-1.5 bg-emerald-50/60 dark:bg-emerald-900/20 ring-1 ring-emerald-100 dark:ring-emerald-800/30 rounded-xl px-2 py-3 text-center"
+                      >
                         <Avatar name={s.name} size="sm" />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-slate-800 truncate">
+                        <div className="min-w-0 w-full">
+                          <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 truncate leading-tight">
                             {s.name}
                           </p>
                           {s.role && (
-                            <p className="text-[10px] text-slate-400 truncate">
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
                               {s.role}
                             </p>
                           )}
                         </div>
-                      </li>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </div>
 
@@ -693,11 +764,14 @@ function App() {
                     All staff present!
                   </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                     {attendanceCount?.absent.map((s, i) => (
-                      <li key={i} className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-rose-50 ring-1 ring-rose-100 flex items-center justify-center shrink-0">
-                          <span className="text-[10px] font-bold text-rose-400">
+                      <div
+                        key={i}
+                        className="relative flex flex-col items-center gap-1.5 bg-rose-50/60 dark:bg-rose-900/20 ring-1 ring-rose-100 dark:ring-rose-800/30 rounded-xl px-2 py-3 text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-rose-100 dark:bg-rose-900/40 ring-1 ring-rose-200 dark:ring-rose-700/50 flex items-center justify-center shrink-0">
+                          <span className="text-[10px] font-bold text-rose-500">
                             {s.name
                               .trim()
                               .split(" ")
@@ -707,24 +781,24 @@ function App() {
                               .toUpperCase()}
                           </span>
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-slate-500 truncate">
+                        <div className="min-w-0 w-full">
+                          <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate leading-tight">
                             {s.name}
                           </p>
                           {s.role && (
-                            <p className="text-[10px] text-slate-300 truncate">
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
                               {s.role}
                             </p>
                           )}
                         </div>
                         {(s.consecutive_absences ?? 0) >= 2 && (
-                          <span className="text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full shrink-0">
+                          <span className="text-[9px] font-bold bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded-full">
                             {s.consecutive_absences}d streak
                           </span>
                         )}
-                      </li>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </div>
             </div>
@@ -732,9 +806,9 @@ function App() {
         )}
 
         {/* ── Live Attendance ── */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
               Live Attendance
             </h2>
             {!loading && (
@@ -746,7 +820,7 @@ function App() {
           </div>
 
           {/* ── Search & Filter ── */}
-          <div className="px-6 py-3 border-b border-slate-100 flex flex-col sm:flex-row gap-3">
+          <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-700/50 flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <input
@@ -754,32 +828,28 @@ function App() {
                 placeholder="Search staff…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-9 pl-9 pr-4 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 placeholder:text-slate-400 transition-all"
+                className="w-full h-9 pl-9 pr-4 text-sm bg-slate-50 dark:bg-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all"
               />
             </div>
             <div className="flex items-center gap-1.5">
               <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              {(["all", "clocked_in", "on_break", "complete"] as const).map(
-                (s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    className={`h-9 px-3 rounded-lg text-[11px] font-semibold transition-all ${
-                      statusFilter === s
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                    }`}
-                  >
-                    {s === "all"
-                      ? "All"
-                      : s === "clocked_in"
-                        ? "Working"
-                        : s === "on_break"
-                          ? "Break"
-                          : "Done"}
-                  </button>
-                ),
-              )}
+              {(["all", "clocked_in", "complete"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`h-9 px-3 rounded-lg text-[11px] font-semibold transition-all ${
+                    statusFilter === s
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  }`}
+                >
+                  {s === "all"
+                    ? "All"
+                    : s === "clocked_in"
+                      ? "Working"
+                      : "Done"}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -812,10 +882,10 @@ function App() {
               </div>
             ) : filteredAttendance.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-14 text-center">
-                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3">
-                  <Users className="w-6 h-6 text-slate-300" />
+                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                  <Users className="w-6 h-6 text-slate-300 dark:text-slate-500" />
                 </div>
-                <p className="text-sm font-medium text-slate-400">
+                <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
                   {searchQuery || statusFilter !== "all"
                     ? "No staff match your search."
                     : "No attendance records for today."}
@@ -839,7 +909,7 @@ function App() {
                   return (
                     <div
                       key={i}
-                      className={`rounded-2xl border border-slate-200/60 border-l-4 ${cfg.border} p-5 hover:shadow-card-hover hover:scale-[1.01] transition-all duration-200 bg-white animate-fade-in`}
+                      className={`rounded-2xl border border-slate-200/60 dark:border-slate-700/60 border-l-4 ${cfg.border} p-5 hover:shadow-card-hover hover:scale-[1.01] transition-all duration-200 bg-white dark:bg-slate-800 animate-fade-in`}
                       style={{ animationDelay: `${i * 40}ms` }}
                     >
                       {/* Card Header */}
@@ -855,7 +925,7 @@ function App() {
                             )}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-800 truncate">
+                            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
                               {r.name}
                             </p>
                             <div className="flex gap-1 mt-0.5 flex-wrap">
@@ -877,25 +947,25 @@ function App() {
 
                       {/* Stats Grid */}
                       <div className="grid grid-cols-2 gap-2 mt-3">
-                        <div className="bg-slate-50 rounded-xl px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-0.5">
+                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl px-3 py-2.5">
+                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                             Time In
                           </p>
                           <p className="text-sm font-bold tabular-nums text-emerald-600">
                             {r.time_in ?? "—"}
                           </p>
                         </div>
-                        <div className="bg-slate-50 rounded-xl px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-0.5">
+                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl px-3 py-2.5">
+                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                             Time Out
                           </p>
-                          <p className="text-sm font-bold tabular-nums text-slate-600">
+                          <p className="text-sm font-bold tabular-nums text-slate-600 dark:text-slate-300">
                             {r.time_out ?? "—"}
                           </p>
                         </div>
 
                         {/* Break — full width with start/end times */}
-                        <div className="col-span-2 bg-amber-50 rounded-xl px-3 py-2.5">
+                        <div className="col-span-2 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-3 py-2.5">
                           <div className="flex items-center justify-between mb-1">
                             <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-widest">
                               Break
@@ -922,7 +992,7 @@ function App() {
                         </div>
 
                         {/* Total Hours — full width */}
-                        <div className="col-span-2 bg-indigo-50 rounded-xl px-3 py-2.5">
+                        <div className="col-span-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl px-3 py-2.5">
                           <div className="flex items-center justify-between">
                             <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest">
                               Total Hours
@@ -945,13 +1015,13 @@ function App() {
         </div>
 
         {/* ── Tasks card ── */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-700">
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                 Staff Task Log
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                 Activity recorded today
               </p>
             </div>
@@ -962,42 +1032,44 @@ function App() {
               </span>
             )}
           </div>
-          <div className="divide-y divide-slate-50">
+          <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
             {loading ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <SkeletonTaskCard key={i} />
               ))
             ) : todayTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3">
-                  <CheckSquare className="w-6 h-6 text-slate-300" />
+                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                  <CheckSquare className="w-6 h-6 text-slate-300 dark:text-slate-500" />
                 </div>
-                <p className="text-sm font-medium text-slate-400">
+                <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
                   No tasks recorded yet today
                 </p>
-                <p className="text-xs text-slate-300 mt-1">Check back later</p>
+                <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">
+                  Check back later
+                </p>
               </div>
             ) : (
               todayTasks.map((task, i) => (
                 <div
                   key={i}
                   style={{ animationDelay: `${i * 40}ms` }}
-                  className="flex items-start gap-4 px-6 py-4 hover:bg-slate-50/60 transition-colors group animate-fade-in"
+                  className="flex items-start gap-4 px-6 py-4 hover:bg-slate-50/60 dark:hover:bg-slate-700/30 transition-colors group animate-fade-in"
                 >
                   <Avatar name={task.name} size="sm" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-sm font-bold text-slate-800">
+                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100">
                         {task.name}
                       </span>
-                      <span className="text-[10px] text-slate-400 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded font-medium">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded font-medium">
                         {new Date(task.created_at).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
                       </span>
                     </div>
-                    <p className="text-sm text-slate-500 leading-relaxed line-clamp-2">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2">
                       {task.task}
                     </p>
                   </div>
@@ -1018,23 +1090,23 @@ function App() {
         </div>
 
         {/* ── Summaries ── */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-700">
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                 Attendance Summaries
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                 Aggregated attendance data
               </p>
             </div>
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+            <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
               <button
                 onClick={() => setSummaryTab("weekly")}
                 className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors ${
                   summaryTab === "weekly"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? "bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 }`}
               >
                 Weekly
@@ -1043,136 +1115,314 @@ function App() {
                 onClick={() => setSummaryTab("monthly")}
                 className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors ${
                   summaryTab === "monthly"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? "bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 }`}
               >
                 Monthly
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            {summaryTab === "weekly" ? (
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-100 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-6">Week</th>
-                    <th className="py-3 px-4">Period</th>
-                    <th className="py-3 px-4">Staff</th>
-                    <th className="py-3 px-4">Days Worked</th>
-                    <th className="py-3 px-4">Total Hours</th>
-                    <th className="py-3 px-6 text-right">Avg hrs/day</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <SkeletonRow key={i} />
-                    ))
-                  ) : weeklySummaries.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="py-10 text-center text-slate-400 text-sm"
-                      >
-                        No weekly summary data available.
-                      </td>
-                    </tr>
-                  ) : (
-                    weeklySummaries.map((w, i) => (
-                      <tr
-                        key={i}
-                        className="hover:bg-slate-50/60 transition-colors"
-                      >
-                        <td className="py-3.5 px-6 font-bold text-slate-700">
-                          {w.week}
-                        </td>
-                        <td className="py-3.5 px-4 text-xs text-slate-400 tabular-nums">
-                          {w.week_start} – {w.week_end}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                            <Users className="w-3 h-3" />
-                            {w.unique_staff}
+
+          {summaryTab === "weekly" ? (
+            <div className="p-6">
+              {loading ? (
+                <div className="h-64 rounded-xl animate-shimmer" />
+              ) : weeklySummaries.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                    <TrendingUp className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                    No weekly summary data available.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Weekly stat pills */}
+                  <div className="flex flex-wrap gap-3 mb-6">
+                    {weeklySummaries.slice(-1).map((w, i) => (
+                      <Fragment key={i}>
+                        <div className="flex items-center gap-1.5 bg-blue-50 ring-1 ring-blue-100 px-3 py-1.5 rounded-full">
+                          <Users className="w-3 h-3 text-blue-500" />
+                          <span className="text-[11px] font-bold text-blue-600">
+                            {w.unique_staff} staff this week
                           </span>
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-medium text-slate-600">
-                          {w.days_worked}
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-bold text-indigo-600">
-                          {fmtHours(w.total_hours)}
-                        </td>
-                        <td className="py-3.5 px-6 text-right tabular-nums text-slate-500">
-                          {fmtHours(w.avg_hours_per_day)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            ) : (
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-100 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-6">Month</th>
-                    <th className="py-3 px-4">Staff</th>
-                    <th className="py-3 px-4">Days Worked</th>
-                    <th className="py-3 px-4">Total Hours</th>
-                    <th className="py-3 px-4">Avg hrs/day</th>
-                    <th className="py-3 px-6 text-right">Break Hours</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <SkeletonRow key={i} />
-                    ))
-                  ) : monthlySummaries.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="py-10 text-center text-slate-400 text-sm"
-                      >
-                        No monthly summary data available.
-                      </td>
-                    </tr>
-                  ) : (
-                    monthlySummaries.map((m, i) => (
-                      <tr
-                        key={i}
-                        className="hover:bg-slate-50/60 transition-colors"
-                      >
-                        <td className="py-3.5 px-6 font-bold text-slate-700">
-                          {m.month_name}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                            <Users className="w-3 h-3" />
-                            {m.unique_staff}
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-200 px-3 py-1.5 rounded-full">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {w.days_worked} days worked
                           </span>
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-medium text-slate-600">
-                          {m.days_worked}
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-bold text-indigo-600">
-                          {fmtHours(m.total_hours)}
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums text-slate-500">
-                          {fmtHours(m.avg_hours_per_day)}
-                        </td>
-                        <td className="py-3.5 px-6 text-right tabular-nums text-amber-600 font-semibold">
-                          {fmtHours(m.total_break_hours)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-indigo-50 ring-1 ring-indigo-100 px-3 py-1.5 rounded-full">
+                          <Clock className="w-3 h-3 text-indigo-500" />
+                          <span className="text-[11px] font-bold text-indigo-600">
+                            {fmtHours(w.total_hours)} total
+                          </span>
+                        </div>
+                      </Fragment>
+                    ))}
+                  </div>
+
+                  {/* Pie charts — 2 column grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Total Hours by Week */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Total Hours by Week
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={weeklySummaries}
+                            dataKey="total_hours"
+                            nameKey="week"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            {weeklySummaries.map((_, idx) => (
+                              <Cell
+                                key={idx}
+                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              fmtHours(value),
+                              "Total Hours",
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Days Worked by Week */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Days Worked by Week
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={weeklySummaries}
+                            dataKey="days_worked"
+                            nameKey="week"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            {weeklySummaries.map((_, idx) => (
+                              <Cell
+                                key={idx}
+                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              value ?? 0,
+                              "Days Worked",
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="p-6">
+              {loading ? (
+                <div className="h-64 rounded-xl animate-shimmer" />
+              ) : monthlySummaries.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                    <TrendingUp className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                    No monthly summary data available.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Monthly stat pills */}
+                  <div className="flex flex-wrap gap-3 mb-6">
+                    {monthlySummaries.slice(-1).map((m, i) => (
+                      <Fragment key={i}>
+                        <div className="flex items-center gap-1.5 bg-blue-50 ring-1 ring-blue-100 px-3 py-1.5 rounded-full">
+                          <Users className="w-3 h-3 text-blue-500" />
+                          <span className="text-[11px] font-bold text-blue-600">
+                            {m.unique_staff} staff this month
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-200 px-3 py-1.5 rounded-full">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {m.days_worked} days worked
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-indigo-50 ring-1 ring-indigo-100 px-3 py-1.5 rounded-full">
+                          <Clock className="w-3 h-3 text-indigo-500" />
+                          <span className="text-[11px] font-bold text-indigo-600">
+                            {fmtHours(m.total_hours)} total
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-amber-50 ring-1 ring-amber-100 px-3 py-1.5 rounded-full">
+                          <Coffee className="w-3 h-3 text-amber-500" />
+                          <span className="text-[11px] font-bold text-amber-600">
+                            {fmtHours(m.total_break_hours)} break
+                          </span>
+                        </div>
+                      </Fragment>
+                    ))}
+                  </div>
+
+                  {/* Pie charts — 2 column grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Total Hours by Month */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Total Hours by Month
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={monthlySummaries}
+                            dataKey="total_hours"
+                            nameKey="month_name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            {monthlySummaries.map((_, idx) => (
+                              <Cell
+                                key={idx}
+                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              fmtHours(value),
+                              "Total Hours",
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Worked vs Break Hours (aggregate) */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Worked vs Break Hours
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={[
+                              {
+                                name: "Worked",
+                                value: monthlySummaries.reduce(
+                                  (s, m) =>
+                                    s +
+                                    (m.total_hours -
+                                      (m.total_break_hours ?? 0)),
+                                  0,
+                                ),
+                              },
+                              {
+                                name: "Break",
+                                value: monthlySummaries.reduce(
+                                  (s, m) => s + (m.total_break_hours ?? 0),
+                                  0,
+                                ),
+                              },
+                            ]}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            <Cell fill="#6366f1" />
+                            <Cell fill="#fbbf24" />
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              fmtHours(value),
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        <p className="text-center text-xs text-slate-300 pb-2 select-none">
+        <p className="text-center text-xs text-slate-300 dark:text-slate-600 pb-2 select-none">
           Digital Benefits · Attendance Dashboard
         </p>
       </main>
@@ -1184,50 +1434,52 @@ function App() {
             className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
             onClick={() => setShowPreview(false)}
           />
-          <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-modal border border-slate-200/80 flex flex-col max-h-[88vh] animate-slide-up">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <div className="relative bg-white dark:bg-slate-800 w-full max-w-2xl rounded-2xl shadow-modal border border-slate-200/80 dark:border-slate-700 flex flex-col max-h-[88vh] animate-slide-up">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-emerald-50 rounded-xl ring-1 ring-emerald-100">
+                <div className="p-2.5 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl ring-1 ring-emerald-100 dark:ring-emerald-800/40">
                   <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-800">Export Report</h3>
-                  <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+                  <h3 className="font-bold text-slate-800 dark:text-slate-100">
+                    Export Report
+                  </h3>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
                     <Calendar className="w-3 h-3" /> {formattedDate}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowPreview(false)}
-                className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-400"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-auto p-6 space-y-6 bg-slate-50/50">
+            <div className="flex-1 overflow-auto p-6 space-y-6 bg-slate-50/50 dark:bg-slate-900/30">
               {/* Absent preview */}
               {(attendanceCount?.absent.length ?? 0) > 0 && (
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
                     Absent Staff Preview
                   </p>
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
                     <table className="w-full text-xs text-left">
-                      <thead className="bg-rose-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
+                      <thead className="bg-rose-50 dark:bg-rose-900/20 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
                         <tr>
                           <th className="px-3 py-2.5">Name</th>
                           <th className="px-3 py-2.5">Role</th>
                           <th className="px-3 py-2.5">Streak</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-50">
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {attendanceCount?.absent.map((s, i) => (
-                          <tr key={i}>
-                            <td className="px-3 py-2.5 font-semibold text-slate-700">
+                          <tr key={i} className="dark:bg-slate-800">
+                            <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">
                               {s.name}
                             </td>
-                            <td className="px-3 py-2.5 text-slate-500">
+                            <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400">
                               {s.role || "—"}
                             </td>
                             <td className="px-3 py-2.5">
@@ -1249,12 +1501,12 @@ function App() {
 
               {/* Attendance preview */}
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
                   Attendance Preview
                 </p>
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
                   <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
+                    <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
                       <tr>
                         <th className="px-3 py-2.5">Name</th>
                         <th className="px-3 py-2.5">In</th>
@@ -1265,10 +1517,10 @@ function App() {
                         <th className="px-3 py-2.5">Flags</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                       {todayAttendance.slice(0, 6).map((r, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-2.5 font-semibold text-slate-700">
+                        <tr key={i} className="dark:bg-slate-800">
+                          <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">
                             {r.name}
                           </td>
                           <td className="px-3 py-2.5 tabular-nums">
@@ -1314,12 +1566,12 @@ function App() {
 
               {/* Task Log preview */}
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
                   Task Log Preview
                 </p>
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
                   <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
+                    <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
                       <tr>
                         <th className="px-3 py-2.5">Staff</th>
                         <th className="px-3 py-2.5">Task</th>
@@ -1327,13 +1579,13 @@ function App() {
                         <th className="px-3 py-2.5">Link</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                       {todayTasks.slice(0, 5).map((t, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-2.5 font-semibold text-slate-700 whitespace-nowrap">
+                        <tr key={i} className="dark:bg-slate-800">
+                          <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
                             {t.name}
                           </td>
-                          <td className="px-3 py-2.5 max-w-[180px] truncate text-slate-600">
+                          <td className="px-3 py-2.5 max-w-[180px] truncate text-slate-600 dark:text-slate-300">
                             {t.task}
                           </td>
                           <td className="px-3 py-2.5 tabular-nums text-slate-500 whitespace-nowrap">
@@ -1359,10 +1611,10 @@ function App() {
               </div>
             </div>
 
-            <div className="p-5 border-t border-slate-100 bg-white rounded-b-2xl flex justify-end gap-3">
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-b-2xl flex justify-end gap-3">
               <button
                 onClick={() => setShowPreview(false)}
-                className="h-10 px-4 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+                className="h-10 px-4 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
               >
                 Cancel
               </button>
