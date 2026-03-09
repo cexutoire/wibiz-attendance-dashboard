@@ -1,4 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Tooltip,
+  Legend,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from "recharts";
 import {
   RefreshCw,
   ExternalLink,
@@ -16,6 +29,9 @@ import {
   Briefcase,
   Search,
   Filter,
+  Moon,
+  Sun,
+  LayoutDashboard,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -25,6 +41,8 @@ import {
   fetchAttendanceCount,
   fetchWeeklySummary,
   fetchMonthlySummary,
+  fetchDailySummary,
+  fetchWeekSummary,
 } from "./api";
 import type {
   AttendanceRecord,
@@ -33,6 +51,8 @@ import type {
   AttendanceCount,
   WeeklySummary,
   MonthlySummary,
+  DailySummary,
+  WeekSummary,
 } from "./types";
 
 // ─── Avatar helpers ──────────────────────────────────────────────────────────
@@ -74,21 +94,6 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
 }
 
 // ─── Skeleton ────────────────────────────────────────────────────────────────
-function SkeletonRow() {
-  return (
-    <tr>
-      {[44, 28, 22, 18, 18, 14].map((w, i) => (
-        <td key={i} className="py-4 px-4">
-          <div
-            className="h-3 rounded animate-shimmer"
-            style={{ width: `${w}%`, minWidth: 32 }}
-          />
-        </td>
-      ))}
-    </tr>
-  );
-}
-
 function SkeletonTaskCard() {
   return (
     <div className="flex items-start gap-4 px-6 py-4">
@@ -100,6 +105,18 @@ function SkeletonTaskCard() {
     </div>
   );
 }
+
+// ─── Chart colors ───────────────────────────────────────────────────────────
+const CHART_COLORS = [
+  "#6366f1",
+  "#3b82f6",
+  "#10b981",
+  "#f59e0b",
+  "#ec4899",
+  "#8b5cf6",
+  "#14b8a6",
+  "#f97316",
+];
 
 // ─── Status config ───────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<
@@ -167,14 +184,14 @@ function HoursProgress({ hours, status }: { hours?: number; status: string }) {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
           Progress
         </span>
-        <span className="text-[10px] font-bold text-slate-500 tabular-nums">
+        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 tabular-nums">
           {fmtHours(hours)} / {TARGET_HOURS}h
         </span>
       </div>
-      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+      <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-700 ${cfg.progress}`}
           style={{ width: `${pct}%` }}
@@ -197,21 +214,73 @@ function App() {
   const [monthlySummaries, setMonthlySummaries] = useState<MonthlySummary[]>(
     [],
   );
+  const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]);
+  const [staffWeekData, setStaffWeekData] = useState<WeekSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summaryTab, setSummaryTab] = useState<"weekly" | "monthly">("weekly");
   const [showPreview, setShowPreview] = useState(false);
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "attendance" | "tasks" | "history"
+  >("overview");
+  const [exportPreset, setExportPreset] = useState<
+    | "today"
+    | "yesterday"
+    | "last7"
+    | "this_month"
+    | "last_month"
+    | "all"
+    | "custom"
+  >("today");
+  const [exportStart, setExportStart] = useState(
+    () => new Date().toISOString().split("T")[0],
+  );
+  const [exportEnd, setExportEnd] = useState(
+    () => new Date().toISOString().split("T")[0],
+  );
   const [currentDate, setCurrentDate] = useState(new Date());
   const [liveTime, setLiveTime] = useState(new Date());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<
-    "all" | "clocked_in" | "on_break" | "complete"
+    "all" | "clocked_in" | "complete"
   >("all");
+  const [dark, setDark] = useState<boolean>(() => {
+    const stored = localStorage.getItem("theme");
+    if (stored === "dark") return true;
+    if (stored === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+
+  useEffect(() => {
+    if (dark) {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("theme", "light");
+    }
+  }, [dark]);
+
+  const tooltipStyle = dark
+    ? {
+        borderRadius: 12,
+        border: "1px solid #334155",
+        fontSize: 12,
+        boxShadow: "0 4px 16px rgba(0,0,0,.4)",
+        backgroundColor: "#1e293b",
+        color: "#e2e8f0",
+      }
+    : {
+        borderRadius: 12,
+        border: "1px solid #e2e8f0",
+        fontSize: 12,
+        boxShadow: "0 4px 16px rgba(0,0,0,.08)",
+      };
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [attendance, statistics, tasks, count, weekly, monthly] =
+      const [attendance, statistics, tasks, count, weekly, monthly, daily, weekStaff] =
         await Promise.all([
           fetchTodayAttendance(),
           fetchStats(),
@@ -219,6 +288,8 @@ function App() {
           fetchAttendanceCount(),
           fetchWeeklySummary(),
           fetchMonthlySummary(),
+          fetchDailySummary(),
+          fetchWeekSummary(),
         ]);
       setTodayAttendance(attendance);
       setStats(statistics);
@@ -226,6 +297,8 @@ function App() {
       setAttendanceCount(count);
       setWeeklySummaries(weekly);
       setMonthlySummaries(monthly);
+      setDailySummaries(daily);
+      setStaffWeekData(weekStaff);
       setCurrentDate(new Date());
       setError(null);
     } catch (err) {
@@ -239,7 +312,7 @@ function App() {
 
   useEffect(() => {
     loadData();
-    const dataInterval = setInterval(loadData, 30000);
+    const dataInterval = setInterval(loadData, 300000); // refresh every 5 minutes
     const clockInterval = setInterval(() => setLiveTime(new Date()), 1000);
     return () => {
       clearInterval(dataInterval);
@@ -272,95 +345,192 @@ function App() {
   const downloadXLSX = () => {
     const wb = XLSX.utils.book_new();
 
-    // ── Attendance sheet ──
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
-        [
-          "Member",
-          "Time In",
-          "Time Out",
-          "Break Start",
-          "Break End",
-          "Break Duration",
-          "Total Hours",
-          "Status",
-          "Late",
-          "Undertime",
-        ],
-        ...todayAttendance.map((r) => [
-          r.name,
-          r.time_in || "-",
-          r.time_out || "-",
-          r.break_start || "-",
-          r.break_end || "-",
-          fmtHours(r.break_duration),
-          fmtHours(r.hours_worked),
-          r.status.toUpperCase(),
-          r.late ? "YES" : "No",
-          r.undertime ? "YES" : "No",
+    // ── Sheet 1: Daily Summary (always included) ──────────────────────────
+    if (rangeDaily.length > 0) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          [
+            "Date",
+            "Day",
+            "Staff Count",
+            "Total Hours",
+            "Avg Hrs / Person",
+            "Completed",
+            "Still Working",
+          ],
+          ...rangeDaily.map((d) => {
+            const dt = new Date(d.date + "T00:00:00");
+            return [
+              d.date,
+              dt.toLocaleDateString("en-PH", { weekday: "long" }),
+              d.staff_count,
+              d.total_hours.toFixed(2),
+              d.staff_count > 0
+                ? (d.total_hours / d.staff_count).toFixed(2)
+                : "-",
+              d.completed,
+              d.still_working,
+            ];
+          }),
         ]),
-      ]),
-      "Attendance",
-    );
+        "Daily Summary",
+      );
+    }
 
-    // ── Absent sheet ──
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
-        ["Absent Staff", "Role", "Consecutive Absent Days"],
-        ...(attendanceCount?.absent ?? []).map((s) => [
-          s.name,
-          s.role || "-",
-          s.consecutive_absences ?? 1,
+    // ── Sheet 2: Live Attendance (today raw) — only if range covers today ──
+    if (rangeIncludesToday && todayAttendance.length > 0) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          [
+            "Name",
+            "Date",
+            "Time In",
+            "Time Out",
+            "Break Start",
+            "Break End",
+            "Break Duration",
+            "Hours Worked",
+            "Status",
+            "Late",
+            "Undertime",
+          ],
+          ...todayAttendance.map((r) => [
+            r.name,
+            todayStr,
+            r.time_in || "-",
+            r.time_out || "-",
+            r.break_start || "-",
+            r.break_end || "-",
+            fmtHours(r.break_duration),
+            fmtHours(r.hours_worked),
+            r.status.toUpperCase(),
+            r.late ? "YES" : "No",
+            r.undertime ? "YES" : "No",
+          ]),
         ]),
-      ]),
-      "Absent Today",
-    );
+        "Live Attendance",
+      );
 
-    // ── Task Report sheet ──
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
-        ["Staff", "Task Detail", "Time", "Link"],
-        ...todayTasks.map((t) => [
-          t.name,
-          t.task,
-          new Date(t.created_at).toLocaleTimeString(),
-          t.url || "-",
+      // ── Sheet 3: Absent Today ──────────────────────────────────────────
+      if ((attendanceCount?.absent.length ?? 0) > 0) {
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.aoa_to_sheet([
+            ["Name", "Role", "Consecutive Absent Days"],
+            ...(attendanceCount?.absent ?? []).map((s) => [
+              s.name,
+              s.role || "-",
+              s.consecutive_absences ?? 1,
+            ]),
+          ]),
+          "Absent Today",
+        );
+      }
+
+      // ── Sheet 4: Task Report ──────────────────────────────────────────
+      if (todayTasks.length > 0) {
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.aoa_to_sheet([
+            ["Staff", "Task Detail", "Time", "Link"],
+            ...todayTasks.map((t) => [
+              t.name,
+              t.task,
+              new Date(t.created_at).toLocaleTimeString("en-PH"),
+              t.url || "-",
+            ]),
+          ]),
+          "Task Report",
+        );
+      }
+    }
+
+    // ── Sheet 5: Weekly Summary filtered to range ─────────────────────────
+    if (rangeWeekly.length > 0) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          [
+            "Week",
+            "Week Start",
+            "Week End",
+            "Staff",
+            "Days Worked",
+            "Total Hours",
+            "Avg Hrs / Day",
+          ],
+          ...rangeWeekly.map((w) => [
+            w.week,
+            w.week_start,
+            w.week_end,
+            w.unique_staff,
+            w.days_worked,
+            w.total_hours.toFixed(2),
+            w.avg_hours_per_day.toFixed(2),
+          ]),
         ]),
-      ]),
-      "Task Report",
-    );
+        "Weekly Summary",
+      );
+    }
 
-    // ── Weekly Summary sheet ──
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet([
-        [
-          "Week",
-          "Period",
-          "Staff",
-          "Days Worked",
-          "Total Hours",
-          "Avg hrs/day",
-        ],
-        ...weeklySummaries.map((w) => [
-          w.week,
-          `${w.week_start} – ${w.week_end}`,
-          w.unique_staff,
-          w.days_worked,
-          w.total_hours.toFixed(1),
-          w.avg_hours_per_day.toFixed(1),
+    // ── Sheet 6: Monthly Summary filtered to range ────────────────────────
+    if (rangeMonthly.length > 0) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          [
+            "Month",
+            "Period",
+            "Staff",
+            "Days Worked",
+            "Total Hours",
+            "Break Hours",
+            "Avg Hrs / Day",
+          ],
+          ...rangeMonthly.map((m) => [
+            m.month_name,
+            m.month,
+            m.unique_staff,
+            m.days_worked,
+            m.total_hours.toFixed(2),
+            m.total_break_hours.toFixed(2),
+            m.avg_hours_per_day.toFixed(2),
+          ]),
         ]),
-      ]),
-      "Weekly Summary",
-    );
+        "Monthly Summary",
+      );
+    }
 
-    XLSX.writeFile(
-      wb,
-      `Attendance_Report_${currentDate.toISOString().split("T")[0]}.xlsx`,
-    );
+    // ── Sheet 7: Staff Per-Person Totals (current week) ─────────────────
+    if (rangeIncludesThisWeek && staffWeekData.length > 0) {
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.aoa_to_sheet([
+          ["Name", "Total Hours (This Week)", "Days Worked (This Week)"],
+          ...staffWeekData
+            .slice()
+            .sort((a, b) => b.total_hours - a.total_hours)
+            .map((s) => [
+              s.name,
+              s.total_hours.toFixed(2),
+              s.days_worked,
+            ]),
+        ]),
+        "Staff (This Week)",
+      );
+    }
+
+    if (wb.SheetNames.length === 0) {
+      alert("No data available for the selected date range.");
+      return;
+    }
+
+    const safeLabel = rangeLabel
+      .replace(/[/\\?%*:|"<>]/g, "-")
+      .replace(/\s+/g, "_");
+    XLSX.writeFile(wb, `Attendance_${safeLabel}.xlsx`);
   };
 
   const presentCount = attendanceCount?.present_count ?? 0;
@@ -377,6 +547,126 @@ function App() {
   );
   const hasAlerts =
     streakers.length > 0 || lateStaff.length > 0 || undertimeStaff.length > 0;
+
+  // ── Yesterday / History helpers ──────────────────────────────────────────
+  const yesterday = new Date(currentDate);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split("T")[0];
+  const formattedYesterday = yesterday.toLocaleDateString("en-PH", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const yesterdayData =
+    dailySummaries.find((d) => d.date === yesterdayStr) ?? null;
+  const historySorted = [...dailySummaries].sort((a, b) =>
+    b.date.localeCompare(a.date),
+  );
+  const historyChartData = [...dailySummaries]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => ({
+      ...d,
+      label: new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", {
+        month: "short",
+        day: "numeric",
+      }),
+    }));
+
+  // ── Export range helpers ─────────────────────────────────────────────────
+  const todayStr = currentDate.toISOString().split("T")[0];
+
+  // Compute actual start/end ISO strings for the chosen preset
+  const presetRange = (() => {
+    const d = (offset: number) => {
+      const dt = new Date(currentDate);
+      dt.setDate(dt.getDate() + offset);
+      return dt.toISOString().split("T")[0];
+    };
+    const firstOfMonth = (mo: number) => {
+      const dt = new Date(currentDate);
+      dt.setMonth(dt.getMonth() + mo, 1);
+      return dt.toISOString().split("T")[0];
+    };
+    const lastOfMonth = (mo: number) => {
+      const dt = new Date(currentDate);
+      dt.setMonth(dt.getMonth() + mo + 1, 0);
+      return dt.toISOString().split("T")[0];
+    };
+    const earliest =
+      dailySummaries.length > 0
+        ? [...dailySummaries].sort((a, b) => a.date.localeCompare(b.date))[0]
+            .date
+        : todayStr;
+    switch (exportPreset) {
+      case "today":
+        return { start: todayStr, end: todayStr };
+      case "yesterday":
+        return { start: yesterdayStr, end: yesterdayStr };
+      case "last7":
+        return { start: d(-7), end: yesterdayStr };
+      case "this_month":
+        return { start: firstOfMonth(0), end: todayStr };
+      case "last_month":
+        return { start: firstOfMonth(-1), end: lastOfMonth(-1) };
+      case "all":
+        return { start: earliest, end: todayStr };
+      case "custom":
+        return { start: exportStart, end: exportEnd };
+    }
+  })();
+
+  const rangeStart = presetRange.start;
+  const rangeEnd = presetRange.end;
+  const rangeIncludesToday = rangeStart <= todayStr && todayStr <= rangeEnd;
+
+  // Current ISO-week Monday
+  const thisWeekStart = (() => {
+    const d = new Date(currentDate);
+    const dow = d.getDay(); // 0=Sun
+    d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+    return d.toISOString().split("T")[0];
+  })();
+  // Range overlaps [thisWeekStart … today] → staff-week data is relevant
+  const rangeIncludesThisWeek =
+    rangeStart <= todayStr && thisWeekStart <= rangeEnd;
+
+  const PRESET_OPTIONS = [
+    ["today", "Today"],
+    ["yesterday", "Yesterday"],
+    ["last7", "Last 7 Days"],
+    ["this_month", "This Month"],
+    ["last_month", "Last Month"],
+    ["all", "All Time"],
+    ["custom", "Custom Range"],
+  ] as const;
+
+  const rangeLabel =
+    exportPreset === "custom"
+      ? rangeStart === rangeEnd
+        ? new Date(rangeStart + "T00:00:00").toLocaleDateString("en-PH", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : `${new Date(rangeStart + "T00:00:00").toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(rangeEnd + "T00:00:00").toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}`
+      : PRESET_OPTIONS.find(([k]) => k === exportPreset)?.[1] ?? "";
+
+  // Filter datasets to the range
+  const rangeDaily = [...dailySummaries]
+    .filter((d) => d.date >= rangeStart && d.date <= rangeEnd)
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const rangeWeekly = weeklySummaries.filter(
+    (w) => w.week_end >= rangeStart && w.week_start <= rangeEnd,
+  );
+
+  const rangeMonthly = monthlySummaries.filter(
+    (m) => m.month >= rangeStart.slice(0, 7) && m.month <= rangeEnd.slice(0, 7),
+  );
+
+  const rangeTotalHours = rangeDaily.reduce((s, d) => s + d.total_hours, 0);
+  const rangeTotalStaff = rangeDaily.reduce((s, d) => s + d.staff_count, 0);
 
   const statCards = [
     {
@@ -413,17 +703,17 @@ function App() {
       trend: "up",
       trendLabel: "Active",
     },
-    {
-      label: "On Break",
-      value: stats?.on_break ?? 0,
-      sub: "",
-      icon: <Coffee className="w-5 h-5" />,
-      color: "text-amber-600",
-      bg: "bg-amber-50",
-      ring: "ring-amber-100",
-      trend: "neutral",
-      trendLabel: "Resting",
-    },
+    // {
+    //   label: "On Break",
+    //   value: stats?.on_break ?? 0,
+    //   sub: "",
+    //   icon: <Coffee className="w-5 h-5" />,
+    //   color: "text-amber-600",
+    //   bg: "bg-amber-50",
+    //   ring: "ring-amber-100",
+    //   trend: "neutral",
+    //   trendLabel: "Resting",
+    // },
     {
       label: "Weekly Hours",
       value: `${stats?.week_hours ?? 0}h`,
@@ -449,40 +739,67 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-sans transition-colors duration-200">
       {/* ── Header ── */}
-      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+      <header className="sticky top-0 z-30 bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-700/80 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-inner">
               <Briefcase className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-bold text-slate-800 leading-tight">
+              <h1 className="text-sm font-bold text-slate-800 dark:text-slate-100 leading-tight">
                 Digital Benefits
               </h1>
-              <p className="text-[10px] text-slate-400 font-medium tracking-wide">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium tracking-wide">
                 ATTENDANCE DASHBOARD
               </p>
             </div>
           </div>
 
           <div className="hidden sm:flex flex-col items-center pointer-events-none select-none">
-            <span className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5 text-indigo-400" />
               {formattedDate}
             </span>
-            <span className="text-base font-bold tabular-nums text-slate-700 tracking-tight flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-base font-bold tabular-nums text-slate-700 dark:text-slate-200 tracking-tight flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
               {liveTimeStr}
             </span>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Theme toggle — always visible */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-700/60 rounded-lg p-0.5 gap-0.5">
+              <button
+                onClick={() => setDark(false)}
+                className={`flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-semibold transition-all ${
+                  !dark
+                    ? "bg-white dark:bg-slate-600 text-amber-500 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                }`}
+                aria-label="Light mode"
+              >
+                <Sun className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Light</span>
+              </button>
+              <button
+                onClick={() => setDark(true)}
+                className={`flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-semibold transition-all ${
+                  dark
+                    ? "bg-white dark:bg-slate-600 text-indigo-500 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                }`}
+                aria-label="Dark mode"
+              >
+                <Moon className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Dark</span>
+              </button>
+            </div>
             <button
               onClick={loadData}
               disabled={loading}
-              className="h-9 px-3 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="h-9 px-3 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors flex items-center gap-2 disabled:opacity-50"
             >
               <RefreshCw
                 className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
@@ -500,16 +817,41 @@ function App() {
             </button>
           </div>
         </div>
+
+        {/* ── Section Nav ── */}
+        <div className="border-t border-slate-200/60 dark:border-slate-700/60">
+          <nav className="max-w-6xl mx-auto px-4 sm:px-6 flex overflow-x-auto">
+            {(["overview", "attendance", "tasks", "history"] as const).map((id) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`flex items-center gap-1.5 h-10 px-4 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === id
+                    ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                    : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
+                {id === "overview" && <LayoutDashboard className="w-3.5 h-3.5 shrink-0" />}
+                {id === "attendance" && <Users className="w-3.5 h-3.5 shrink-0" />}
+                {id === "tasks" && <CheckSquare className="w-3.5 h-3.5 shrink-0" />}
+                {id === "history" && <TrendingUp className="w-3.5 h-3.5 shrink-0" />}
+                <span>{({ overview: "Overview", attendance: "Attendance", tasks: "Tasks", history: "History & Reports" } as const)[id]}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
       </header>
 
       {/* ── Main ── */}
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-6 animate-fade-in">
+        {/* ── Overview Tab ── */}
+        {activeTab === "overview" && <>
         {/* ── Management Alert Banner ── */}
         {!loading && hasAlerts && (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex flex-wrap gap-4 items-start">
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-2xl px-5 py-4 flex flex-wrap gap-4 items-start">
             <div className="flex items-center gap-2 shrink-0">
               <AlertCircle className="w-4 h-4 text-amber-500" />
-              <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
                 Management Alerts
               </span>
             </div>
@@ -543,11 +885,11 @@ function App() {
         )}
 
         {/* ── Stat Cards ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {statCards.map((card) => (
             <div
               key={card.label}
-              className="bg-white rounded-2xl border border-slate-200/60 p-5 shadow-card hover:shadow-card-hover hover:scale-[1.02] transition-all duration-200"
+              className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 p-5 shadow-card hover:shadow-card-hover hover:scale-[1.02] transition-all duration-200"
             >
               <div
                 className={`w-10 h-10 ${card.bg} ring-1 ${card.ring} rounded-xl flex items-center justify-center mb-3`}
@@ -559,11 +901,13 @@ function App() {
               >
                 {card.value}
               </p>
-              <p className="text-xs font-medium text-slate-400 mt-1">
+              <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-1">
                 {card.label}
               </p>
               {card.sub && (
-                <p className="text-[10px] text-slate-300 mt-0.5">{card.sub}</p>
+                <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">
+                  {card.sub}
+                </p>
               )}
               <div className="flex items-center gap-1 mt-2">
                 {card.trend === "up" ? (
@@ -591,13 +935,13 @@ function App() {
 
         {/* ── Attendance Count card ── */}
         {(attendanceCount || loading) && (
-          <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-bold text-slate-700">
+                <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                   Attendance Count
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                   {attendanceCount?.date ?? "Today"}
                 </p>
               </div>
@@ -618,7 +962,7 @@ function App() {
                         {attendanceRate}%
                       </p>
                     </div>
-                    <div className="w-20 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="w-20 h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-700 ${
                           attendanceRate >= 80
@@ -638,7 +982,7 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+            <div className="grid grid-cols-1 sm:grid-cols-2 items-start divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-700/50">
               {/* Present */}
               <div className="p-5">
                 <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
@@ -656,23 +1000,26 @@ function App() {
                     No staff present yet
                   </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                     {attendanceCount?.present.map((s, i) => (
-                      <li key={i} className="flex items-center gap-2.5">
+                      <div
+                        key={i}
+                        className="flex flex-col items-center gap-1.5 bg-emerald-50/60 dark:bg-emerald-900/20 ring-1 ring-emerald-100 dark:ring-emerald-800/30 rounded-xl px-2 py-3 text-center"
+                      >
                         <Avatar name={s.name} size="sm" />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-slate-800 truncate">
+                        <div className="min-w-0 w-full">
+                          <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 truncate leading-tight">
                             {s.name}
                           </p>
                           {s.role && (
-                            <p className="text-[10px] text-slate-400 truncate">
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
                               {s.role}
                             </p>
                           )}
                         </div>
-                      </li>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </div>
 
@@ -693,11 +1040,14 @@ function App() {
                     All staff present!
                   </p>
                 ) : (
-                  <ul className="space-y-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                     {attendanceCount?.absent.map((s, i) => (
-                      <li key={i} className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-rose-50 ring-1 ring-rose-100 flex items-center justify-center shrink-0">
-                          <span className="text-[10px] font-bold text-rose-400">
+                      <div
+                        key={i}
+                        className="relative flex flex-col items-center gap-1.5 bg-rose-50/60 dark:bg-rose-900/20 ring-1 ring-rose-100 dark:ring-rose-800/30 rounded-xl px-2 py-3 text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-rose-100 dark:bg-rose-900/40 ring-1 ring-rose-200 dark:ring-rose-700/50 flex items-center justify-center shrink-0">
+                          <span className="text-[10px] font-bold text-rose-500">
                             {s.name
                               .trim()
                               .split(" ")
@@ -707,34 +1057,130 @@ function App() {
                               .toUpperCase()}
                           </span>
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-slate-500 truncate">
+                        <div className="min-w-0 w-full">
+                          <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate leading-tight">
                             {s.name}
                           </p>
                           {s.role && (
-                            <p className="text-[10px] text-slate-300 truncate">
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate mt-0.5">
                               {s.role}
                             </p>
                           )}
                         </div>
                         {(s.consecutive_absences ?? 0) >= 2 && (
-                          <span className="text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full shrink-0">
+                          <span className="text-[9px] font-bold bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 px-1.5 py-0.5 rounded-full">
                             {s.consecutive_absences}d streak
                           </span>
                         )}
-                      </li>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         )}
+        </> /* end overview */}
+
+        {/* ── Attendance Tab ── */}
+        {activeTab === "attendance" && <>
+        {/* ── Yesterday's Summary ── */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                Yesterday's Summary
+              </h2>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1.5">
+                <Calendar className="w-3 h-3" />
+                {formattedYesterday}
+              </p>
+            </div>
+            {!loading && yesterdayData && (
+              <span
+                className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full ${
+                  yesterdayData.completed === yesterdayData.staff_count
+                    ? "text-emerald-600 bg-emerald-50 ring-1 ring-emerald-100"
+                    : "text-amber-600 bg-amber-50 ring-1 ring-amber-100"
+                }`}
+              >
+                {yesterdayData.completed === yesterdayData.staff_count
+                  ? "All Complete"
+                  : `${yesterdayData.still_working} still working`}
+              </span>
+            )}
+          </div>
+          <div className="p-6">
+            {loading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-20 rounded-xl animate-shimmer" />
+                ))}
+              </div>
+            ) : !yesterdayData ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                  <Calendar className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+                </div>
+                <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                  No data available for yesterday.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-100 dark:ring-blue-800/30 rounded-2xl p-4 flex flex-col gap-1">
+                  <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">
+                    Staff Present
+                  </p>
+                  <p className="text-2xl font-black tabular-nums text-blue-600 leading-none">
+                    {yesterdayData.staff_count}
+                  </p>
+                  <p className="text-[10px] text-blue-400">records logged</p>
+                </div>
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-100 dark:ring-indigo-800/30 rounded-2xl p-4 flex flex-col gap-1">
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">
+                    Total Hours
+                  </p>
+                  <p className="text-2xl font-black tabular-nums text-indigo-600 leading-none">
+                    {fmtHours(yesterdayData.total_hours)}
+                  </p>
+                  <p className="text-[10px] text-indigo-400">
+                    avg{" "}
+                    {yesterdayData.staff_count > 0
+                      ? fmtHours(
+                          yesterdayData.total_hours / yesterdayData.staff_count,
+                        )
+                      : "—"}{" "}
+                    / person
+                  </p>
+                </div>
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 ring-1 ring-emerald-100 dark:ring-emerald-800/30 rounded-2xl p-4 flex flex-col gap-1">
+                  <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">
+                    Completed
+                  </p>
+                  <p className="text-2xl font-black tabular-nums text-emerald-600 leading-none">
+                    {yesterdayData.completed}
+                  </p>
+                  <p className="text-[10px] text-emerald-400">clocked out</p>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-100 dark:ring-amber-800/30 rounded-2xl p-4 flex flex-col gap-1">
+                  <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">
+                    Still Working
+                  </p>
+                  <p className="text-2xl font-black tabular-nums text-amber-600 leading-none">
+                    {yesterdayData.still_working}
+                  </p>
+                  <p className="text-[10px] text-amber-400">no clock-out</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ── Live Attendance ── */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-700">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
               Live Attendance
             </h2>
             {!loading && (
@@ -746,7 +1192,7 @@ function App() {
           </div>
 
           {/* ── Search & Filter ── */}
-          <div className="px-6 py-3 border-b border-slate-100 flex flex-col sm:flex-row gap-3">
+          <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-700/50 flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <input
@@ -754,32 +1200,28 @@ function App() {
                 placeholder="Search staff…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-9 pl-9 pr-4 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 placeholder:text-slate-400 transition-all"
+                className="w-full h-9 pl-9 pr-4 text-sm bg-slate-50 dark:bg-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300 placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all"
               />
             </div>
             <div className="flex items-center gap-1.5">
               <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              {(["all", "clocked_in", "on_break", "complete"] as const).map(
-                (s) => (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    className={`h-9 px-3 rounded-lg text-[11px] font-semibold transition-all ${
-                      statusFilter === s
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                    }`}
-                  >
-                    {s === "all"
-                      ? "All"
-                      : s === "clocked_in"
-                        ? "Working"
-                        : s === "on_break"
-                          ? "Break"
-                          : "Done"}
-                  </button>
-                ),
-              )}
+              {(["all", "clocked_in", "complete"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`h-9 px-3 rounded-lg text-[11px] font-semibold transition-all ${
+                    statusFilter === s
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  }`}
+                >
+                  {s === "all"
+                    ? "All"
+                    : s === "clocked_in"
+                      ? "Working"
+                      : "Done"}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -812,10 +1254,10 @@ function App() {
               </div>
             ) : filteredAttendance.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-14 text-center">
-                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3">
-                  <Users className="w-6 h-6 text-slate-300" />
+                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                  <Users className="w-6 h-6 text-slate-300 dark:text-slate-500" />
                 </div>
-                <p className="text-sm font-medium text-slate-400">
+                <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
                   {searchQuery || statusFilter !== "all"
                     ? "No staff match your search."
                     : "No attendance records for today."}
@@ -839,7 +1281,7 @@ function App() {
                   return (
                     <div
                       key={i}
-                      className={`rounded-2xl border border-slate-200/60 border-l-4 ${cfg.border} p-5 hover:shadow-card-hover hover:scale-[1.01] transition-all duration-200 bg-white animate-fade-in`}
+                      className={`rounded-2xl border border-slate-200/60 dark:border-slate-700/60 border-l-4 ${cfg.border} p-5 hover:shadow-card-hover hover:scale-[1.01] transition-all duration-200 bg-white dark:bg-slate-800 animate-fade-in`}
                       style={{ animationDelay: `${i * 40}ms` }}
                     >
                       {/* Card Header */}
@@ -855,7 +1297,7 @@ function App() {
                             )}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-800 truncate">
+                            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
                               {r.name}
                             </p>
                             <div className="flex gap-1 mt-0.5 flex-wrap">
@@ -877,25 +1319,25 @@ function App() {
 
                       {/* Stats Grid */}
                       <div className="grid grid-cols-2 gap-2 mt-3">
-                        <div className="bg-slate-50 rounded-xl px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-0.5">
+                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl px-3 py-2.5">
+                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                             Time In
                           </p>
                           <p className="text-sm font-bold tabular-nums text-emerald-600">
                             {r.time_in ?? "—"}
                           </p>
                         </div>
-                        <div className="bg-slate-50 rounded-xl px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-0.5">
+                        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-xl px-3 py-2.5">
+                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                             Time Out
                           </p>
-                          <p className="text-sm font-bold tabular-nums text-slate-600">
+                          <p className="text-sm font-bold tabular-nums text-slate-600 dark:text-slate-300">
                             {r.time_out ?? "—"}
                           </p>
                         </div>
 
                         {/* Break — full width with start/end times */}
-                        <div className="col-span-2 bg-amber-50 rounded-xl px-3 py-2.5">
+                        <div className="col-span-2 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-3 py-2.5">
                           <div className="flex items-center justify-between mb-1">
                             <p className="text-[10px] font-semibold text-amber-400 uppercase tracking-widest">
                               Break
@@ -922,7 +1364,7 @@ function App() {
                         </div>
 
                         {/* Total Hours — full width */}
-                        <div className="col-span-2 bg-indigo-50 rounded-xl px-3 py-2.5">
+                        <div className="col-span-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl px-3 py-2.5">
                           <div className="flex items-center justify-between">
                             <p className="text-[10px] font-semibold text-indigo-400 uppercase tracking-widest">
                               Total Hours
@@ -943,15 +1385,17 @@ function App() {
             )}
           </div>
         </div>
+        </> /* end attendance */}
 
-        {/* ── Tasks card ── */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        {/* ── Tasks Tab ── */}
+        {activeTab === "tasks" && <>
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-700">
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                 Staff Task Log
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                 Activity recorded today
               </p>
             </div>
@@ -962,79 +1406,249 @@ function App() {
               </span>
             )}
           </div>
-          <div className="divide-y divide-slate-50">
+          <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
             {loading ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <SkeletonTaskCard key={i} />
               ))
             ) : todayTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mb-3">
-                  <CheckSquare className="w-6 h-6 text-slate-300" />
+                <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                  <CheckSquare className="w-6 h-6 text-slate-300 dark:text-slate-500" />
                 </div>
-                <p className="text-sm font-medium text-slate-400">
+                <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
                   No tasks recorded yet today
                 </p>
-                <p className="text-xs text-slate-300 mt-1">Check back later</p>
+                <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">
+                  Check back later
+                </p>
               </div>
             ) : (
-              todayTasks.map((task, i) => (
+              // Group tasks by person
+              Object.entries(
+                todayTasks.reduce<Record<string, Task[]>>((acc, task) => {
+                  acc[task.name] = acc[task.name] || [];
+                  acc[task.name].push(task);
+                  return acc;
+                }, {}),
+              ).map(([name, tasks], i) => (
                 <div
                   key={i}
                   style={{ animationDelay: `${i * 40}ms` }}
-                  className="flex items-start gap-4 px-6 py-4 hover:bg-slate-50/60 transition-colors group animate-fade-in"
+                  className="px-6 py-4 hover:bg-slate-50/60 dark:hover:bg-slate-700/30 transition-colors group animate-fade-in"
                 >
-                  <Avatar name={task.name} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-sm font-bold text-slate-800">
-                        {task.name}
+                  <div className="flex items-start gap-4 mb-3">
+                    <Avatar name={name} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100 block">
+                        {name}
                       </span>
-                      <span className="text-[10px] text-slate-400 tabular-nums bg-slate-100 px-1.5 py-0.5 rounded font-medium">
-                        {new Date(task.created_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                        {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
                       </span>
                     </div>
-                    <p className="text-sm text-slate-500 leading-relaxed line-clamp-2">
-                      {task.task}
-                    </p>
                   </div>
-                  {task.url && (
-                    <a
-                      href={task.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-0.5 p-2 rounded-lg text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
-                  )}
+                  <div className="space-y-2">
+                    {tasks.map((task, taskIdx) => (
+                      <div key={taskIdx} className="flex items-start gap-2">
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded font-medium shrink-0">
+                          {new Date(task.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 flex-1">
+                          {task.task}
+                        </p>
+                        {task.url && (
+                          <a
+                            href={task.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 rounded-lg text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all shrink-0"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))
             )}
           </div>
         </div>
+        </> /* end tasks */}
+
+        {/* ── History & Reports Tab ── */}
+        {activeTab === "history" && <>
+        {/* ── Attendance History ── */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                Attendance History
+              </h2>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                Daily attendance records
+              </p>
+            </div>
+            {!loading && dailySummaries.length > 0 && (
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2.5 py-1 rounded-full">
+                {dailySummaries.length}{" "}
+                {dailySummaries.length === 1 ? "day" : "days"}
+              </span>
+            )}
+          </div>
+          {loading ? (
+            <div className="p-6">
+              <div className="h-48 rounded-xl animate-shimmer" />
+            </div>
+          ) : dailySummaries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-14 text-center p-6">
+              <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                <TrendingUp className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+              </div>
+              <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                No history data available.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Bar chart */}
+              <div className="px-6 pt-6 pb-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 text-center">
+                  Total Hours per Day
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart
+                    data={historyChartData}
+                    margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={dark ? "#334155" : "#f1f5f9"}
+                    />
+                    <XAxis
+                      dataKey="label"
+                      tick={{
+                        fontSize: 10,
+                        fill: dark ? "#94a3b8" : "#94a3b8",
+                      }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{
+                        fontSize: 10,
+                        fill: dark ? "#94a3b8" : "#94a3b8",
+                      }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      contentStyle={tooltipStyle}
+                      formatter={(value: number | undefined) => [
+                        fmtHours(value),
+                        "Total Hours",
+                      ]}
+                    />
+                    <Bar
+                      dataKey="total_hours"
+                      fill="#6366f1"
+                      radius={[6, 6, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* History table */}
+              <div className="px-6 pb-6 overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-700/50 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <th className="pb-2 pr-4">Date</th>
+                      <th className="pb-2 pr-4 text-right">Staff</th>
+                      <th className="pb-2 pr-4 text-right">Total Hours</th>
+                      <th className="pb-2 pr-4 text-right">Avg / Person</th>
+                      <th className="pb-2 pr-4 text-right">Completed</th>
+                      <th className="pb-2 text-right">Still Working</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 dark:divide-slate-700/40">
+                    {historySorted.map((d, i) => {
+                      const isYesterday = d.date === yesterdayStr;
+                      const avg =
+                        d.staff_count > 0
+                          ? fmtHours(d.total_hours / d.staff_count)
+                          : "—";
+                      return (
+                        <tr
+                          key={i}
+                          className={`transition-colors ${
+                            isYesterday
+                              ? "bg-indigo-50/50 dark:bg-indigo-900/10"
+                              : "hover:bg-slate-50/60 dark:hover:bg-slate-700/20"
+                          }`}
+                        >
+                          <td className="py-3 pr-4 font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap flex items-center gap-2">
+                            {new Date(
+                              d.date + "T00:00:00",
+                            ).toLocaleDateString("en-PH", {
+                              weekday: "short",
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                            {isYesterday && (
+                              <span className="text-[9px] font-bold text-indigo-600 bg-indigo-100 dark:bg-indigo-900/40 px-1.5 py-0.5 rounded-full">
+                                Yesterday
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                            {d.staff_count}
+                          </td>
+                          <td className="py-3 pr-4 text-right tabular-nums font-semibold text-indigo-600">
+                            {fmtHours(d.total_hours)}
+                          </td>
+                          <td className="py-3 pr-4 text-right tabular-nums text-slate-500 dark:text-slate-400">
+                            {avg}
+                          </td>
+                          <td className="py-3 pr-4 text-right tabular-nums text-emerald-600 font-semibold">
+                            {d.completed}
+                          </td>
+                          <td className="py-3 text-right tabular-nums text-amber-500">
+                            {d.still_working > 0 ? d.still_working : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
 
         {/* ── Summaries ── */}
-        <div className="bg-white rounded-2xl border border-slate-200/60 shadow-card overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 shadow-card overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-700">
+              <h2 className="text-sm font-bold text-slate-700 dark:text-slate-200">
                 Attendance Summaries
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                 Aggregated attendance data
               </p>
             </div>
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+            <div className="flex gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
               <button
                 onClick={() => setSummaryTab("weekly")}
                 className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors ${
                   summaryTab === "weekly"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? "bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 }`}
               >
                 Weekly
@@ -1043,138 +1657,317 @@ function App() {
                 onClick={() => setSummaryTab("monthly")}
                 className={`text-[11px] font-semibold px-3 py-1.5 rounded-md transition-colors ${
                   summaryTab === "monthly"
-                    ? "bg-white text-indigo-600 shadow-sm"
-                    : "text-slate-400 hover:text-slate-600"
+                    ? "bg-white dark:bg-slate-600 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
                 }`}
               >
                 Monthly
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            {summaryTab === "weekly" ? (
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-100 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-6">Week</th>
-                    <th className="py-3 px-4">Period</th>
-                    <th className="py-3 px-4">Staff</th>
-                    <th className="py-3 px-4">Days Worked</th>
-                    <th className="py-3 px-4">Total Hours</th>
-                    <th className="py-3 px-6 text-right">Avg hrs/day</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <SkeletonRow key={i} />
-                    ))
-                  ) : weeklySummaries.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="py-10 text-center text-slate-400 text-sm"
-                      >
-                        No weekly summary data available.
-                      </td>
-                    </tr>
-                  ) : (
-                    weeklySummaries.map((w, i) => (
-                      <tr
-                        key={i}
-                        className="hover:bg-slate-50/60 transition-colors"
-                      >
-                        <td className="py-3.5 px-6 font-bold text-slate-700">
-                          {w.week}
-                        </td>
-                        <td className="py-3.5 px-4 text-xs text-slate-400 tabular-nums">
-                          {w.week_start} – {w.week_end}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                            <Users className="w-3 h-3" />
-                            {w.unique_staff}
+
+          {summaryTab === "weekly" ? (
+            <div className="p-6">
+              {loading ? (
+                <div className="h-64 rounded-xl animate-shimmer" />
+              ) : weeklySummaries.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                    <TrendingUp className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                    No weekly summary data available.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Weekly stat pills */}
+                  <div className="flex flex-wrap gap-3 mb-6">
+                    {weeklySummaries.slice(-1).map((w, i) => (
+                      <Fragment key={i}>
+                        <div className="flex items-center gap-1.5 bg-blue-50 ring-1 ring-blue-100 px-3 py-1.5 rounded-full">
+                          <Users className="w-3 h-3 text-blue-500" />
+                          <span className="text-[11px] font-bold text-blue-600">
+                            {w.unique_staff} staff this week
                           </span>
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-medium text-slate-600">
-                          {w.days_worked}
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-bold text-indigo-600">
-                          {fmtHours(w.total_hours)}
-                        </td>
-                        <td className="py-3.5 px-6 text-right tabular-nums text-slate-500">
-                          {fmtHours(w.avg_hours_per_day)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            ) : (
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-100 text-left text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-3 px-6">Month</th>
-                    <th className="py-3 px-4">Staff</th>
-                    <th className="py-3 px-4">Days Worked</th>
-                    <th className="py-3 px-4">Total Hours</th>
-                    <th className="py-3 px-4">Avg hrs/day</th>
-                    <th className="py-3 px-6 text-right">Break Hours</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <SkeletonRow key={i} />
-                    ))
-                  ) : monthlySummaries.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="py-10 text-center text-slate-400 text-sm"
-                      >
-                        No monthly summary data available.
-                      </td>
-                    </tr>
-                  ) : (
-                    monthlySummaries.map((m, i) => (
-                      <tr
-                        key={i}
-                        className="hover:bg-slate-50/60 transition-colors"
-                      >
-                        <td className="py-3.5 px-6 font-bold text-slate-700">
-                          {m.month_name}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                            <Users className="w-3 h-3" />
-                            {m.unique_staff}
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-200 px-3 py-1.5 rounded-full">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {w.days_worked} days worked
                           </span>
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-medium text-slate-600">
-                          {m.days_worked}
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums font-bold text-indigo-600">
-                          {fmtHours(m.total_hours)}
-                        </td>
-                        <td className="py-3.5 px-4 tabular-nums text-slate-500">
-                          {fmtHours(m.avg_hours_per_day)}
-                        </td>
-                        <td className="py-3.5 px-6 text-right tabular-nums text-amber-600 font-semibold">
-                          {fmtHours(m.total_break_hours)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-indigo-50 ring-1 ring-indigo-100 px-3 py-1.5 rounded-full">
+                          <Clock className="w-3 h-3 text-indigo-500" />
+                          <span className="text-[11px] font-bold text-indigo-600">
+                            {fmtHours(w.total_hours)} total
+                          </span>
+                        </div>
+                      </Fragment>
+                    ))}
+                  </div>
+
+                  {/* Pie charts — 2 column grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Total Hours by Week */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Total Hours by Week
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={weeklySummaries}
+                            dataKey="total_hours"
+                            nameKey="week"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            {weeklySummaries.map((_, idx) => (
+                              <Cell
+                                key={idx}
+                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              fmtHours(value),
+                              "Total Hours",
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Days Worked by Week */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Days Worked by Week
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={weeklySummaries}
+                            dataKey="days_worked"
+                            nameKey="week"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            {weeklySummaries.map((_, idx) => (
+                              <Cell
+                                key={idx}
+                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              value ?? 0,
+                              "Days Worked",
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="p-6">
+              {loading ? (
+                <div className="h-64 rounded-xl animate-shimmer" />
+              ) : monthlySummaries.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                    <TrendingUp className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                    No monthly summary data available.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Monthly stat pills */}
+                  <div className="flex flex-wrap gap-3 mb-6">
+                    {monthlySummaries.slice(-1).map((m, i) => (
+                      <Fragment key={i}>
+                        <div className="flex items-center gap-1.5 bg-blue-50 ring-1 ring-blue-100 px-3 py-1.5 rounded-full">
+                          <Users className="w-3 h-3 text-blue-500" />
+                          <span className="text-[11px] font-bold text-blue-600">
+                            {m.unique_staff} staff this month
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-200 px-3 py-1.5 rounded-full">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <span className="text-[11px] font-bold text-slate-600">
+                            {m.days_worked} days worked
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-indigo-50 ring-1 ring-indigo-100 px-3 py-1.5 rounded-full">
+                          <Clock className="w-3 h-3 text-indigo-500" />
+                          <span className="text-[11px] font-bold text-indigo-600">
+                            {fmtHours(m.total_hours)} total
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-amber-50 ring-1 ring-amber-100 px-3 py-1.5 rounded-full">
+                          <Coffee className="w-3 h-3 text-amber-500" />
+                          <span className="text-[11px] font-bold text-amber-600">
+                            {fmtHours(m.total_break_hours)} break
+                          </span>
+                        </div>
+                      </Fragment>
+                    ))}
+                  </div>
+
+                  {/* Pie charts — 2 column grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {/* Total Hours by Month */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Total Hours by Month
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={monthlySummaries}
+                            dataKey="total_hours"
+                            nameKey="month_name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            {monthlySummaries.map((_, idx) => (
+                              <Cell
+                                key={idx}
+                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              fmtHours(value),
+                              "Total Hours",
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Worked vs Break Hours (aggregate) */}
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 text-center">
+                        Worked vs Break Hours
+                      </p>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={[
+                              {
+                                name: "Worked",
+                                value: monthlySummaries.reduce(
+                                  (s, m) =>
+                                    s +
+                                    (m.total_hours -
+                                      (m.total_break_hours ?? 0)),
+                                  0,
+                                ),
+                              },
+                              {
+                                name: "Break",
+                                value: monthlySummaries.reduce(
+                                  (s, m) => s + (m.total_break_hours ?? 0),
+                                  0,
+                                ),
+                              },
+                            ]}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={80}
+                            innerRadius={36}
+                            paddingAngle={3}
+                            label={({ percent = 0 }) =>
+                              percent > 0.05
+                                ? `${(percent * 100).toFixed(0)}%`
+                                : ""
+                            }
+                            labelLine={false}
+                          >
+                            <Cell fill="#6366f1" />
+                            <Cell fill="#fbbf24" />
+                          </Pie>
+                          <Tooltip
+                            contentStyle={tooltipStyle}
+                            formatter={(value: number | undefined) => [
+                              fmtHours(value),
+                            ]}
+                          />
+                          <Legend
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ fontSize: 11 }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        <p className="text-center text-xs text-slate-300 pb-2 select-none">
+        <p className="text-center text-xs text-slate-300 dark:text-slate-600 pb-2 select-none">
           Digital Benefits · Attendance Dashboard
         </p>
+        </> /* end history */}
       </main>
 
       {/* ── Export Modal ── */}
@@ -1184,197 +1977,502 @@ function App() {
             className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
             onClick={() => setShowPreview(false)}
           />
-          <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-modal border border-slate-200/80 flex flex-col max-h-[88vh] animate-slide-up">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <div className="relative bg-white dark:bg-slate-800 w-full max-w-2xl rounded-2xl shadow-modal border border-slate-200/80 dark:border-slate-700 flex flex-col max-h-[88vh] animate-slide-up">
+            {/* Modal header */}
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-emerald-50 rounded-xl ring-1 ring-emerald-100">
+                <div className="p-2.5 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl ring-1 ring-emerald-100 dark:ring-emerald-800/40">
                   <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-800">Export Report</h3>
-                  <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
-                    <Calendar className="w-3 h-3" /> {formattedDate}
+                  <h3 className="font-bold text-slate-800 dark:text-slate-100">
+                    Export Report
+                  </h3>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" /> {rangeLabel}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowPreview(false)}
-                className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400"
+                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors text-slate-400"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-auto p-6 space-y-6 bg-slate-50/50">
-              {/* Absent preview */}
-              {(attendanceCount?.absent.length ?? 0) > 0 && (
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
-                    Absent Staff Preview
-                  </p>
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                    <table className="w-full text-xs text-left">
-                      <thead className="bg-rose-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
-                        <tr>
-                          <th className="px-3 py-2.5">Name</th>
-                          <th className="px-3 py-2.5">Role</th>
-                          <th className="px-3 py-2.5">Streak</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {attendanceCount?.absent.map((s, i) => (
-                          <tr key={i}>
-                            <td className="px-3 py-2.5 font-semibold text-slate-700">
-                              {s.name}
-                            </td>
-                            <td className="px-3 py-2.5 text-slate-500">
-                              {s.role || "—"}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              {(s.consecutive_absences ?? 0) >= 2 ? (
-                                <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-full">
-                                  {s.consecutive_absences}d
-                                </span>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Attendance preview */}
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
-                  Attendance Preview
-                </p>
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="px-3 py-2.5">Name</th>
-                        <th className="px-3 py-2.5">In</th>
-                        <th className="px-3 py-2.5">Out</th>
-                        <th className="px-3 py-2.5">Break Time</th>
-                        <th className="px-3 py-2.5">Break Dur.</th>
-                        <th className="px-3 py-2.5">Total Hours</th>
-                        <th className="px-3 py-2.5">Flags</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {todayAttendance.slice(0, 6).map((r, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-2.5 font-semibold text-slate-700">
-                            {r.name}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums">
-                            {r.time_in || "—"}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums">
-                            {r.time_out || "—"}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums text-amber-600 whitespace-nowrap">
-                            {r.break_start || r.break_end
-                              ? `${r.break_start ?? "—"} → ${r.break_end ?? "ongoing"}`
-                              : "—"}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums text-amber-600 font-semibold">
-                            {fmtHours(r.break_duration)}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums font-semibold text-indigo-600">
-                            {fmtHours(r.hours_worked)}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex gap-1">
-                              {r.late && (
-                                <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full">
-                                  Late
-                                </span>
-                              )}
-                              {r.undertime && (
-                                <span className="text-[10px] font-bold bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded-full">
-                                  UT
-                                </span>
-                              )}
-                              {!r.late && !r.undertime && (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Task Log preview */}
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
-                  Task Log Preview
-                </p>
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="px-3 py-2.5">Staff</th>
-                        <th className="px-3 py-2.5">Task</th>
-                        <th className="px-3 py-2.5">Time</th>
-                        <th className="px-3 py-2.5">Link</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {todayTasks.slice(0, 5).map((t, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-2.5 font-semibold text-slate-700 whitespace-nowrap">
-                            {t.name}
-                          </td>
-                          <td className="px-3 py-2.5 max-w-[180px] truncate text-slate-600">
-                            {t.task}
-                          </td>
-                          <td className="px-3 py-2.5 tabular-nums text-slate-500 whitespace-nowrap">
-                            {new Date(t.created_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            {t.url ? (
-                              <span className="text-indigo-600 font-semibold">
-                                Yes
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            {/* Preset picker */}
+            <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-700/50 flex flex-wrap gap-1.5">
+              {PRESET_OPTIONS.map(([scope, label]) => (
+                <button
+                  key={scope}
+                  onClick={() => setExportPreset(scope)}
+                  className={`h-8 px-3 rounded-lg text-[11px] font-semibold transition-all ${
+                    exportPreset === scope
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
-            <div className="p-5 border-t border-slate-100 bg-white rounded-b-2xl flex justify-end gap-3">
-              <button
-                onClick={() => setShowPreview(false)}
-                className="h-10 px-4 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  downloadXLSX();
-                  setShowPreview(false);
-                }}
-                className="h-10 px-5 bg-indigo-600 text-white text-sm font-semibold rounded-xl flex items-center gap-2 hover:bg-indigo-700 shadow-sm transition-all active:scale-95"
-              >
-                <Download className="w-4 h-4" /> Download .xlsx
-              </button>
+            {/* Custom date range inputs */}
+            {exportPreset === "custom" && (
+              <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-700/50 flex flex-wrap items-center gap-4 bg-indigo-50/50 dark:bg-indigo-900/10">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  From
+                  <input
+                    type="date"
+                    value={exportStart}
+                    max={exportEnd}
+                    onChange={(e) => setExportStart(e.target.value)}
+                    className="ml-1 h-8 px-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  To
+                  <input
+                    type="date"
+                    value={exportEnd}
+                    min={exportStart}
+                    max={todayStr}
+                    onChange={(e) => setExportEnd(e.target.value)}
+                    className="ml-1 h-8 px-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-auto p-6 space-y-6 bg-slate-50/50 dark:bg-slate-900/30">
+              {rangeDaily.length === 0 && !rangeIncludesToday ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-2xl flex items-center justify-center mb-3">
+                    <Calendar className="w-6 h-6 text-slate-300 dark:text-slate-500" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-400 dark:text-slate-500">
+                    No data available for this period.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Summary pills */}
+                  <div className="flex flex-wrap gap-2">
+                    {rangeDaily.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 bg-blue-50 ring-1 ring-blue-100 px-2.5 py-1 rounded-full">
+                        <Calendar className="w-3 h-3" /> {rangeDaily.length} day
+                        {rangeDaily.length !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {(rangeTotalHours > 0 || rangeIncludesToday) && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-600 bg-indigo-50 ring-1 ring-indigo-100 px-2.5 py-1 rounded-full">
+                        <Clock className="w-3 h-3" /> {fmtHours(rangeTotalHours)} total
+                      </span>
+                    )}
+                    {rangeTotalStaff > 0 && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 bg-emerald-50 ring-1 ring-emerald-100 px-2.5 py-1 rounded-full">
+                        <Users className="w-3 h-3" /> {rangeTotalStaff} staff records
+                      </span>
+                    )}
+                    {rangeIncludesToday && (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 bg-amber-50 ring-1 ring-amber-100 px-2.5 py-1 rounded-full">
+                        Live data included
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Data availability notice */}
+                  {!rangeIncludesToday && (
+                    <div className="flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 rounded-xl px-4 py-3">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                        <span className="font-bold">Per-person time in/out is only available for today.</span>{" "}
+                        For past dates the export includes daily aggregate totals (staff count, hours, completed).{" "}
+                        {rangeIncludesThisWeek && staffWeekData.length > 0
+                          ? "Per-person weekly totals (this week) are also included."
+                          : ""}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Today live data preview */}
+                  {rangeIncludesToday && (
+                    <>
+                      {/* Absent preview */}
+                      {(attendanceCount?.absent.length ?? 0) > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                            Absent Staff Preview
+                          </p>
+                          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-rose-50 dark:bg-rose-900/20 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                                <tr>
+                                  <th className="px-3 py-2.5">Name</th>
+                                  <th className="px-3 py-2.5">Role</th>
+                                  <th className="px-3 py-2.5">Streak</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {attendanceCount?.absent.map((s, i) => (
+                                  <tr key={i} className="dark:bg-slate-800">
+                                    <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">
+                                      {s.name}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-slate-500 dark:text-slate-400">
+                                      {s.role || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      {(s.consecutive_absences ?? 0) >= 2 ? (
+                                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-full">
+                                          {s.consecutive_absences}d
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Attendance preview */}
+                      {todayAttendance.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
+                            Live Attendance Preview
+                          </p>
+                          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                                <tr>
+                                  <th className="px-3 py-2.5">Name</th>
+                                  <th className="px-3 py-2.5">In</th>
+                                  <th className="px-3 py-2.5">Out</th>
+                                  <th className="px-3 py-2.5">Break Time</th>
+                                  <th className="px-3 py-2.5">Break Dur.</th>
+                                  <th className="px-3 py-2.5">Total Hours</th>
+                                  <th className="px-3 py-2.5">Flags</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {todayAttendance.slice(0, 6).map((r, i) => (
+                                  <tr key={i} className="dark:bg-slate-800">
+                                    <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">
+                                      {r.name}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums">
+                                      {r.time_in || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums">
+                                      {r.time_out || "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums text-amber-600 whitespace-nowrap">
+                                      {r.break_start || r.break_end
+                                        ? `${r.break_start ?? "—"} → ${r.break_end ?? "ongoing"}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums text-amber-600 font-semibold">
+                                      {fmtHours(r.break_duration)}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums font-semibold text-indigo-600">
+                                      {fmtHours(r.hours_worked)}
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      <div className="flex gap-1">
+                                        {r.late && (
+                                          <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full">
+                                            Late
+                                          </span>
+                                        )}
+                                        {r.undertime && (
+                                          <span className="text-[10px] font-bold bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded-full">
+                                            UT
+                                          </span>
+                                        )}
+                                        {!r.late && !r.undertime && (
+                                          <span className="text-slate-300">—</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Task Log preview */}
+                      {todayTasks.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
+                            Task Log Preview
+                          </p>
+                          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                            <table className="w-full text-xs text-left">
+                              <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                                <tr>
+                                  <th className="px-3 py-2.5">Staff</th>
+                                  <th className="px-3 py-2.5">Task</th>
+                                  <th className="px-3 py-2.5">Time</th>
+                                  <th className="px-3 py-2.5">Link</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                {todayTasks.slice(0, 5).map((t, i) => (
+                                  <tr key={i} className="dark:bg-slate-800">
+                                    <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                                      {t.name}
+                                    </td>
+                                    <td className="px-3 py-2.5 max-w-[180px] truncate text-slate-600 dark:text-slate-300">
+                                      {t.task}
+                                    </td>
+                                    <td className="px-3 py-2.5 tabular-nums text-slate-500 whitespace-nowrap">
+                                      {new Date(t.created_at).toLocaleTimeString([], {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      {t.url ? (
+                                        <span className="text-indigo-600 font-semibold">Yes</span>
+                                      ) : (
+                                        <span className="text-slate-300">—</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Daily breakdown preview */}
+                  {rangeDaily.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
+                        Daily Breakdown Preview
+                      </p>
+                      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                            <tr>
+                              <th className="px-3 py-2.5">Date</th>
+                              <th className="px-3 py-2.5 text-right">Staff</th>
+                              <th className="px-3 py-2.5 text-right">Hours</th>
+                              <th className="px-3 py-2.5 text-right">Avg</th>
+                              <th className="px-3 py-2.5 text-right">Done</th>
+                              <th className="px-3 py-2.5 text-right">Active</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {rangeDaily.slice(0, 8).map((d, i) => (
+                              <tr key={i} className="dark:bg-slate-800">
+                                <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                                  {new Date(d.date + "T00:00:00").toLocaleDateString("en-PH", {
+                                    weekday: "short",
+                                    month: "short",
+                                    day: "numeric",
+                                  })}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                  {d.staff_count}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-indigo-600">
+                                  {fmtHours(d.total_hours)}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">
+                                  {d.staff_count > 0
+                                    ? fmtHours(d.total_hours / d.staff_count)
+                                    : "—"}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600 font-semibold">
+                                  {d.completed}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-amber-500">
+                                  {d.still_working > 0 ? d.still_working : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {rangeDaily.length > 8 && (
+                          <p className="px-3 py-2 text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-700 text-center">
+                            +{rangeDaily.length - 8} more rows in export
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Weekly summary mini-preview */}
+                  {rangeWeekly.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
+                        Weekly Summary Preview
+                      </p>
+                      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                            <tr>
+                              <th className="px-3 py-2.5">Week</th>
+                              <th className="px-3 py-2.5 text-right">Staff</th>
+                              <th className="px-3 py-2.5 text-right">Total Hrs</th>
+                              <th className="px-3 py-2.5 text-right">Avg/Day</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {rangeWeekly.slice(0, 6).map((w, i) => (
+                              <tr key={i} className="dark:bg-slate-800">
+                                <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                                  {w.week_start} → {w.week_end}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                  {w.unique_staff}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-indigo-600">
+                                  {fmtHours(w.total_hours)}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">
+                                  {fmtHours(w.avg_hours_per_day)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {rangeWeekly.length > 6 && (
+                          <p className="px-3 py-2 text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-700 text-center">
+                            +{rangeWeekly.length - 6} more rows in export
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Monthly summary mini-preview */}
+                  {rangeMonthly.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
+                        Monthly Summary Preview
+                      </p>
+                      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                            <tr>
+                              <th className="px-3 py-2.5">Month</th>
+                              <th className="px-3 py-2.5 text-right">Staff</th>
+                              <th className="px-3 py-2.5 text-right">Total Hrs</th>
+                              <th className="px-3 py-2.5 text-right">Break Hrs</th>
+                              <th className="px-3 py-2.5 text-right">Avg/Day</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {rangeMonthly.map((m, i) => (
+                              <tr key={i} className="dark:bg-slate-800">
+                                <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">
+                                  {m.month_name}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                  {m.unique_staff}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-indigo-600">
+                                  {fmtHours(m.total_hours)}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-amber-500">
+                                  {fmtHours(m.total_break_hours)}
+                                </td>
+                                <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">
+                                  {fmtHours(m.avg_hours_per_day)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Staff Per-Person Weekly Totals (this week) */}
+                  {rangeIncludesThisWeek && staffWeekData.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">
+                        Staff Per-Person — This Week
+                      </p>
+                      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-indigo-50 dark:bg-indigo-900/20 border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider">
+                            <tr>
+                              <th className="px-3 py-2.5">Name</th>
+                              <th className="px-3 py-2.5 text-right">Days Worked</th>
+                              <th className="px-3 py-2.5 text-right">Total Hours</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {[...staffWeekData]
+                              .sort((a, b) => b.total_hours - a.total_hours)
+                              .slice(0, 10)
+                              .map((s, i) => (
+                                <tr key={i} className="dark:bg-slate-800">
+                                  <td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">
+                                    {s.name}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right tabular-nums text-slate-600 dark:text-slate-300">
+                                    {s.days_worked}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-indigo-600">
+                                    {fmtHours(s.total_hours)}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                        {staffWeekData.length > 10 && (
+                          <p className="px-3 py-2 text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-700 text-center">
+                            +{staffWeekData.length - 10} more in export
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 text-center">
+                        Note: weekly totals only — per-day time in/out not available for past dates
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-b-2xl flex justify-between items-center gap-3">
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:block">
+                Exporting:{" "}
+                <span className="font-semibold text-slate-600 dark:text-slate-300">
+                  {rangeLabel}
+                </span>
+              </p>
+              <div className="flex gap-3 ml-auto">
+                <button
+                  onClick={() => setShowPreview(false)}
+                  className="h-10 px-4 text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    downloadXLSX();
+                    setShowPreview(false);
+                  }}
+                  className="h-10 px-5 bg-indigo-600 text-white text-sm font-semibold rounded-xl flex items-center gap-2 hover:bg-indigo-700 shadow-sm transition-all active:scale-95"
+                >
+                  <Download className="w-4 h-4" /> Download .xlsx
+                </button>
+              </div>
             </div>
           </div>
         </div>
